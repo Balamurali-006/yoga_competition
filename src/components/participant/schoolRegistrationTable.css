@@ -1,0 +1,106 @@
+/* MAIN CONTAINER */
+.school-reg-container {
+  padding: 10px;
+}
+
+.school-reg-title {
+  text-align: center;
+  color: #7B5E57;
+  font-size: 24px;
+  margin-bottom: 15px;
+  font-weight: 700;
+}
+
+/* TABLE WRAPPER */
+.responsive-table {
+  overflow-x: auto;
+}
+
+/* TABLE */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0px 4px 8px rgba(0,0,0,0.1);
+}
+
+/* HEADER */
+table th {
+  padding: 14px;
+  background: #7B5E57;
+  color: white;
+  font-size: 15px;
+  text-align: left;
+}
+
+/* ROWS */
+table td {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+/* INPUTS */
+table input,
+table select {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background: #fafafa;
+  font-size: 14px;
+  transition: 0.3s ease;
+}
+
+table input:focus,
+table select:focus {
+  border-color: #7B5E57;
+  box-shadow: 0 0 4px rgba(123,94,87,0.4);
+  outline: none;
+}
+
+/* BUTTONS */
+.add-btn,
+.submit-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  margin-top: 15px;
+  font-size: 16px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.add-btn {
+  background: #ddd;
+  color: #4C4C4C;
+}
+
+.add-btn:hover {
+  background: #ccc;
+}
+
+.submit-btn {
+  background: #7B5E57;
+  color: white;
+}
+
+.submit-btn:hover {
+  background: #5d463f;
+}
+
+/* MOBILE OPTIMIZATION */
+@media (max-width: 600px) {
+  table th,
+  table td {
+    padding: 10px 6px;
+    font-size: 14px;
+  }
+
+  .add-btn,
+  .submit-btn {
+    font-size: 15px;
+  }
+}

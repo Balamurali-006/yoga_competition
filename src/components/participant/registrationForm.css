@@ -1,0 +1,84 @@
+/* WRAPPER */
+.reg-wrapper {
+  padding: 20px;
+  background: #F2E9E4;
+}
+
+.reg-title {
+  text-align: center;
+  color: #7B5E57;
+  font-size: 26px;
+  font-weight: 700;
+  margin-bottom: 20px;
+}
+
+/* CARD */
+.reg-card {
+  background: #fff;
+  padding: 20px;
+  border-radius: 16px;
+  max-width: 450px;
+  margin: auto;
+  box-shadow: 0px 4px 10px rgba(0,0,0,0.1);
+}
+
+/* INPUT GROUP */
+.reg-group {
+  margin-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+}
+
+.reg-group label {
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: #4C4C4C;
+}
+
+.reg-group input,
+.reg-group select {
+  padding: 14px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  background: #fafafa;
+  font-size: 16px;
+  transition: all 0.3s;
+}
+
+/* Focus styles */
+.reg-group input:focus,
+.reg-group select:focus {
+  border-color: #7B5E57;
+  box-shadow: 0px 0px 4px rgba(123,94,87,0.4);
+  outline: none;
+}
+
+/* SUBMIT BUTTON */
+.reg-btn {
+  width: 100%;
+  padding: 15px;
+  background: #7B5E57;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: 0.3s;
+}
+
+.reg-btn:hover {
+  background: #60463f;
+}
+
+/* DESKTOP */
+@media (min-width: 768px) {
+  .reg-card {
+    padding: 30px;
+  }
+
+  .reg-title {
+    font-size: 30px;
+  }
+}

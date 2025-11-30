@@ -1,0 +1,33 @@
+/* SCHOOL REGISTRATION PAGE */
+.school-wrapper {
+  padding: 30px 20px;
+  background: #F2E9E4;
+  min-height: 100vh;
+}
+
+.school-header {
+  text-align: center;
+  margin-bottom: 25px;
+}
+
+.school-title {
+  font-size: 30px;
+  color: #7B5E57;
+  font-weight: 700;
+}
+
+.school-subtitle {
+  color: #4C4C4C;
+  margin-top: 8px;
+  font-size: 16px;
+}
+
+/* Card Container */
+.school-card {
+  background: white;
+  padding: 22px;
+  border-radius: 16px;
+  max-width: 900px;
+  margin: auto;
+  box-shadow: 0px 4px 10px rgba(0,0,0,0.1);
+}

@@ -1,0 +1,68 @@
+/* MAIN PAGE WRAPPER */
+.school-wrapper {
+  padding: 20px;
+  background: #F2E9E4;
+  min-height: 100vh;
+}
+
+/* HEADER */
+.school-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.school-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: #7B5E57;
+}
+
+.school-subtitle {
+  font-size: 15px;
+  color: #4C4C4C;
+  margin-top: 6px;
+}
+
+/* CARD */
+.school-card {
+  background: #ffffff;
+  padding: 18px;
+  border-radius: 14px;
+  max-width: 900px;
+  margin: auto;
+  box-shadow: 0px 4px 10px rgba(0,0,0,0.1);
+}
+
+/* MOBILE OPTIMIZATION */
+@media (max-width: 768px) {
+  .school-wrapper {
+    padding: 15px;
+  }
+
+  .school-title {
+    font-size: 22px;
+  }
+
+  .school-subtitle {
+    font-size: 14px;
+  }
+
+  .school-card {
+    padding: 14px;
+    border-radius: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .school-title {
+    font-size: 20px;
+  }
+
+  .school-subtitle {
+    font-size: 13px;
+  }
+
+  .school-card {
+    padding: 12px;
+  }
+}
