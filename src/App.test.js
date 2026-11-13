@@ -1,8 +1,18 @@
 import { render, screen } from '@testing-library/react';
 import App from './App';
 
-test('renders learn react link', () => {
+jest.mock('./firebase/auth', () => ({
+  subscribeToAuth: (callback) => {
+    callback(null);
+    return () => {};
+  },
+}));
+
+test('renders the home page content', () => {
   render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+
+  expect(
+    screen.getByRole('heading', { name: /Ekadhma Yoga Competition 2025/i })
+  ).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: /Register Now/i })).toBeInTheDocument();
 });

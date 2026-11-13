@@ -3,23 +3,53 @@ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "../../firebase/firebaseConfig";
 import { useNavigate } from "react-router-dom";
 
+const TEST_FORM_DATA = {
+  name: "Aarav Kumar",
+  dob: "2013-05-10",
+  age: "12",
+  institution: "Green Valley School",
+  instructor: "Ravi Sharma",
+  instructorPhone: "9876543210",
+  email: "aarav.kumar@test.com",
+  event: "district",
+  category: "forward",
+  level: "district",
+};
+
+const emptyForm = {
+  name: "",
+  dob: "",
+  age: "",
+  institution: "",
+  instructor: "",
+  instructorPhone: "",
+  email: "",
+  event: "",
+  category: "",
+  level: "",
+};
+
 const RegistrationForm = () => {
-  const [form, setForm] = useState({
-    name: "",
-    dob: "",
-    age: "",
-    institution: "",
-    instructor: "",
-    instructorPhone: "",
-    email: "",
-    event: "",
-    category: "",
-    level: "",
+  const [form, setForm] = useState(() => {
+    if (process.env.NODE_ENV === "development") {
+      return TEST_FORM_DATA;
+    }
+    return emptyForm;
   });
 
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
+
+  const fillTestData = () => {
+    setForm(TEST_FORM_DATA);
+    setErrors({});
+  };
+
+  const clearForm = () => {
+    setForm(emptyForm);
+    setErrors({});
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -125,6 +155,25 @@ const RegistrationForm = () => {
         </div>
 
         <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8 space-y-6">
+          {process.env.NODE_ENV === "development" && (
+            <div className="flex flex-wrap gap-3 justify-end">
+              <button
+                type="button"
+                onClick={fillTestData}
+                className="px-4 py-2 rounded-lg bg-purple-100 text-purple-700 font-medium hover:bg-purple-200 transition-colors"
+              >
+                Load Test Data
+              </button>
+              <button
+                type="button"
+                onClick={clearForm}
+                className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 transition-colors"
+              >
+                Clear Form
+              </button>
+            </div>
+          )}
+
           <div className="space-y-4">
             <h3 className="text-xl font-semibold text-gray-800 flex items-center space-x-2">
               <span>👤</span>

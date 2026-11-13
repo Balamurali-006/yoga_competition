@@ -1,9 +1,19 @@
 import React, { useState } from "react";
+import { collection, doc, serverTimestamp, writeBatch } from "firebase/firestore";
+import { db } from "../../firebase/firebaseConfig";
+import PaymentButton from "./PaymentButton";
 
 const SchoolRegistrationTable = () => {
   const [students, setStudents] = useState([
-    { name: "", age: "", gender: "", class: "" },
+    { name: "", age: "", gender: "", class: "", event: "district", category: "group", level: "district" },
   ]);
+  const [savedParticipants, setSavedParticipants] = useState([]);
+  const [institution, setInstitution] = useState("");
+  const [instructor, setInstructor] = useState("");
+  const [instructorPhone, setInstructorPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const handleChange = (index, e) => {
     const updated = [...students];
@@ -12,7 +22,7 @@ const SchoolRegistrationTable = () => {
   };
 
   const addRow = () => {
-    setStudents([...students, { name: "", age: "", gender: "", class: "" }]);
+    setStudents([...students, { name: "", age: "", gender: "", class: "", event: "district", category: "group", level: "district" }]);
   };
 
   const removeRow = (index) => {
@@ -22,17 +32,55 @@ const SchoolRegistrationTable = () => {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const validStudents = students.filter(s => s.name && s.age && s.gender && s.class);
     if (validStudents.length === 0) {
-      alert("Please fill in at least one complete student entry!");
+      setError("Please complete at least one student entry.");
       return;
     }
-    alert(`Successfully registered ${validStudents.length} student(s)! Firebase integration coming soon.`);
+    if (!institution.trim() || !instructor.trim() || !/^\d{10}$/.test(instructorPhone.replace(/\D/g, "")) || !email.trim()) {
+      setError("Enter the institution, instructor, a valid 10-digit phone number, and email.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    try {
+      const batch = writeBatch(db);
+      const registrations = validStudents.map((student) => {
+        const participantRef = doc(collection(db, "participants"));
+        batch.set(participantRef, {
+        name: student.name.trim(),
+        age: Number(student.age),
+        gender: student.gender,
+        class: student.class.trim(),
+        institution: institution.trim(),
+        instructor: instructor.trim(),
+        instructorPhone: instructorPhone.replace(/\D/g, ""),
+        email: email.trim(),
+        event: student.event,
+        category: student.category,
+        level: student.level,
+        paymentStatus: "pending",
+        serialNumber: null,
+        createdAt: serverTimestamp(),
+        });
+        return { id: participantRef.id, name: student.name.trim() };
+      });
+      await batch.commit();
+      setSavedParticipants(registrations);
+    } catch (submitError) {
+      console.error("Group registration failed:", submitError);
+      setError("Could not save group registrations. Please check your connection and try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const isFormValid = students.some(s => s.name && s.age && s.gender && s.class);
+
+  const selectClass = "w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all bg-white";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-orange-50 to-purple-50 p-4 md:p-8">
@@ -54,7 +102,22 @@ const SchoolRegistrationTable = () => {
 
         {/* Form Container */}
         <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-purple-100">
-          <div onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit}>
+            <div className="grid gap-4 border-b border-gray-200 p-6 md:grid-cols-2">
+              <label className="text-sm font-medium text-gray-700">Institution
+                <input value={institution} onChange={(event) => setInstitution(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-2" required />
+              </label>
+              <label className="text-sm font-medium text-gray-700">Instructor
+                <input value={instructor} onChange={(event) => setInstructor(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-2" required />
+              </label>
+              <label className="text-sm font-medium text-gray-700">Instructor phone
+                <input value={instructorPhone} onChange={(event) => setInstructorPhone(event.target.value)} inputMode="numeric" className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-2" required />
+              </label>
+              <label className="text-sm font-medium text-gray-700">Contact email
+                <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-2" required />
+              </label>
+            </div>
+            {error && <p role="alert" className="px-6 pt-4 text-sm text-red-700">{error}</p>}
             {/* Desktop Table View */}
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
@@ -64,6 +127,9 @@ const SchoolRegistrationTable = () => {
                     <th className="px-6 py-4 text-left text-sm font-semibold text-white">Age</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-white">Gender</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-white">Class</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-white">Event</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-white">Category</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-white">Level</th>
                     <th className="px-6 py-4 text-center text-sm font-semibold text-white">Action</th>
                   </tr>
                 </thead>
@@ -94,7 +160,7 @@ const SchoolRegistrationTable = () => {
                           name="gender"
                           value={student.gender}
                           onChange={(e) => handleChange(index, e)}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all bg-white"
+                          className={selectClass}
                         >
                           <option value="">Select</option>
                           <option>Male</option>
@@ -110,6 +176,46 @@ const SchoolRegistrationTable = () => {
                           onChange={(e) => handleChange(index, e)}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all"
                         />
+                      </td>
+                      <td className="px-6 py-4">
+                        <select
+                          name="event"
+                          value={student.event}
+                          onChange={(e) => handleChange(index, e)}
+                          className={selectClass}
+                        >
+                          <option value="district">District</option>
+                          <option value="state">State</option>
+                          <option value="national">National</option>
+                        </select>
+                      </td>
+                      <td className="px-6 py-4">
+                        <select
+                          name="category"
+                          value={student.category}
+                          onChange={(e) => handleChange(index, e)}
+                          className={selectClass}
+                        >
+                          <option value="forward">Forward</option>
+                          <option value="backward">Backward</option>
+                          <option value="twist">Twist</option>
+                          <option value="balance">Balance</option>
+                          <option value="standing">Standing</option>
+                          <option value="group">Group</option>
+                        </select>
+                      </td>
+                      <td className="px-6 py-4">
+                        <select
+                          name="level"
+                          value={student.level}
+                          onChange={(e) => handleChange(index, e)}
+                          className={selectClass}
+                        >
+                          <option value="district">District</option>
+                          <option value="state">State</option>
+                          <option value="south-india">South India</option>
+                          <option value="national">National</option>
+                        </select>
                       </td>
                       <td className="px-6 py-4 text-center">
                         <button
@@ -193,13 +299,59 @@ const SchoolRegistrationTable = () => {
                         name="gender"
                         value={student.gender}
                         onChange={(e) => handleChange(index, e)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all bg-white"
+                        className={selectClass}
                       >
                         <option value="">Select</option>
                         <option>Male</option>
                         <option>Female</option>
                         <option>Other</option>
                       </select>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Event</label>
+                        <select
+                          name="event"
+                          value={student.event}
+                          onChange={(e) => handleChange(index, e)}
+                          className={selectClass}
+                        >
+                          <option value="district">District</option>
+                          <option value="state">State</option>
+                          <option value="national">National</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                        <select
+                          name="category"
+                          value={student.category}
+                          onChange={(e) => handleChange(index, e)}
+                          className={selectClass}
+                        >
+                          <option value="forward">Forward</option>
+                          <option value="backward">Backward</option>
+                          <option value="twist">Twist</option>
+                          <option value="balance">Balance</option>
+                          <option value="standing">Standing</option>
+                          <option value="group">Group</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
+                        <select
+                          name="level"
+                          value={student.level}
+                          onChange={(e) => handleChange(index, e)}
+                          className={selectClass}
+                        >
+                          <option value="district">District</option>
+                          <option value="state">State</option>
+                          <option value="south-india">South India</option>
+                          <option value="national">National</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -220,19 +372,32 @@ const SchoolRegistrationTable = () => {
               </button>
               
               <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!isFormValid}
+                type="submit"
+                disabled={!isFormValid || saving}
                 className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-orange-500 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-orange-600 transition-all shadow-lg disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed disabled:shadow-none"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                 </svg>
-                Submit Registration
+                {saving ? "Saving registrations..." : "Submit Registration"}
               </button>
             </div>
-          </div>
+          </form>
         </div>
+
+        {savedParticipants.length > 0 && (
+          <div className="mt-6 rounded-2xl border border-green-200 bg-green-50 p-5">
+            <h2 className="mb-4 text-lg font-semibold text-green-800">Registrations saved. Complete payment for each participant.</h2>
+            <div className="space-y-3">
+              {savedParticipants.map((participant) => (
+                <div key={participant.id} className="flex flex-col gap-3 rounded-xl bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="font-medium text-gray-800">{participant.name}</span>
+                  <PaymentButton amount={Number(process.env.REACT_APP_REGISTRATION_FEE || 2)} participantId={participant.id} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Info Footer */}
         <div className="mt-6 text-center">

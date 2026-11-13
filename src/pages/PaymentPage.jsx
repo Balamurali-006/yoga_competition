@@ -4,7 +4,7 @@ import PaymentButton from "../components/participant/PaymentButton";
 
 const PaymentPage = () => {
   const { pid } = useParams(); // <-- GET REAL PARTICIPANT ID FROM URL
-  const amount = 2; // Registration fee (₹2 for testing)
+  const amount = Number(process.env.REACT_APP_REGISTRATION_FEE || 2);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-purple-50 px-4">

@@ -8,10 +8,31 @@ import {
   deleteDoc,
   getDoc,
   getDocs,
+  onSnapshot,
   doc,
   query,
   where,
 } from "firebase/firestore";
+
+export const subscribeToCollection = (collectionName, callback, onError) => {
+  return onSnapshot(
+    collection(db, collectionName),
+    (snapshot) => callback(snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))),
+    onError
+  );
+};
+
+export const createCollectionDocument = async (collectionName, data) => {
+  return addDoc(collection(db, collectionName), data);
+};
+
+export const updateCollectionDocument = async (collectionName, id, data) => {
+  return updateDoc(doc(db, collectionName, id), data);
+};
+
+export const deleteCollectionDocument = async (collectionName, id) => {
+  return deleteDoc(doc(db, collectionName, id));
+};
 
 // Add new document
 export const createDocument = async (collectionName, data) => {

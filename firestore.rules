@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userRole() {
+      return signedIn()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : null;
+    }
+
+    function isAdmin() {
+      return userRole() == 'admin';
+    }
+
+    function isStaff() {
+      return userRole() in ['admin', 'committee'];
+    }
+
+    match /participants/{participantId} {
+      allow create: if request.resource.data.paymentStatus == 'pending'
+        && request.resource.data.keys().hasOnly([
+          'name', 'dob', 'age', 'institution', 'instructor', 'instructorPhone',
+          'email', 'event', 'category', 'level', 'paymentStatus', 'serialNumber', 'createdAt',
+          'gender', 'class'
+        ]);
+      allow get, list: if isStaff();
+      allow update: if isAdmin() || (userRole() == 'committee'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'scores', 'score', 'scoredAt', 'verificationStatus', 'verifiedAt'
+        ]));
+      allow delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if false;
+    }
+
+    match /events/{documentId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /categories/{documentId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /ageGroups/{documentId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /scoringTemplates/{documentId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

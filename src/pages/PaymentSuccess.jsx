@@ -1,23 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
-import {
-  doc,
-  getDoc,
-  updateDoc,
-  collection,
-  query,
-  where,
-  getDocs
-} from "firebase/firestore";
-import { db } from "../firebase/firebaseConfig";
-
-// Level → Code mapping
-const levelCodeMap = {
-  "district": "DT",
-  "state": "ST",
-  "south-india": "SI",
-  "national": "NT",
-};
 
 const PaymentSuccess = () => {
   const { pid } = useParams();  // participant Firestore ID
@@ -27,61 +9,28 @@ const PaymentSuccess = () => {
   const [participant, setParticipant] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Generate Serial Number
-  const generateSerialNumber = async (level) => {
-    const year = new Date().getFullYear();
-    const code = levelCodeMap[level] || "XX";
-
-    // Count participants with same year+level
-    const q = query(
-      collection(db, "participants"),
-      where("year", "==", year),
-      where("level", "==", level)
-    );
-
-    const snap = await getDocs(q);
-    const count = (snap.size + 1).toString().padStart(4, "0");
-
-    return `${year}-${code}-${count}`;
-  };
-
-  // Handle payment verification + serial number assignment
-  const processPayment = async () => {
-    try {
-      const ref = doc(db, "participants", pid);
-      const snap = await getDoc(ref);
-
-      if (!snap.exists()) {
+  useEffect(() => {
+    const loadReceipt = async () => {
+      if (!paymentId) {
         setLoading(false);
-        return alert("Participant not found!");
+        return;
       }
 
-      const data = snap.data();
+      try {
+        const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
+        const response = await fetch(`${apiBaseUrl}/payment-receipt/${encodeURIComponent(pid)}?payment_id=${encodeURIComponent(paymentId)}`);
+        const receipt = await response.json();
+        if (!response.ok) throw new Error(receipt.error || "Could not retrieve payment receipt.");
+        setParticipant(receipt);
+      } catch (error) {
+        console.error("Payment receipt lookup failed:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-      // Generate ID
-      const serial = await generateSerialNumber(data.level);
-
-      // Update Firestore
-      await updateDoc(ref, {
-        serialNumber: serial,
-        paymentStatus: "paid",
-        paymentId: paymentId || "unknown",
-        year: new Date().getFullYear(),
-      });
-
-      setParticipant({ ...data, serialNumber: serial });
-      setLoading(false);
-
-    } catch (error) {
-      console.error("Payment processing error:", error);
-      setLoading(false);
-      alert("Failed to process payment.");
-    }
-  };
-
-  useEffect(() => {
-    processPayment();
-  }, []);
+    loadReceipt();
+  }, [pid, paymentId]);
 
   // Loading UI
   if (loading) {

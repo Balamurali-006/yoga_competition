@@ -1,6 +1,4 @@
 import React from "react";
-import { doc, updateDoc } from "firebase/firestore";
-import { db } from "../../firebase/firebaseConfig";
 import { useNavigate } from "react-router-dom";
 
 const PaymentButton = ({ amount, participantId }) => {
@@ -8,7 +6,8 @@ const PaymentButton = ({ amount, participantId }) => {
 
   const handlePayment = async () => {
     try {
-      const res = await fetch("http://localhost:5000/create-order", {
+      const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
+      const res = await fetch(`${apiBaseUrl}/create-order`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amount, participantId }),
@@ -16,13 +15,12 @@ const PaymentButton = ({ amount, participantId }) => {
 
       const order = await res.json();
 
-      if (!order.id) {
-        alert("Error creating order");
-        return;
+      if (!res.ok || !order.id) {
+        throw new Error(order.error || "Error creating order");
       }
 
       const options = {
-        key: "rzp_live_RlR2GdFBuBcNdz", // your test key
+        key: process.env.REACT_APP_RAZORPAY_KEY,
         amount: order.amount,
         currency: "INR",
         name: "Ekadhma Yoga Association",
@@ -30,23 +28,21 @@ const PaymentButton = ({ amount, participantId }) => {
         order_id: order.id,
 
         handler: async function (response) {
-          alert("Payment Successful!");
-
-          const paymentId = response.razorpay_payment_id;
-
-          // 1️⃣ Generate serial number
-          const serialNumber =
-            "SN-" + Math.random().toString(36).substring(2, 8).toUpperCase();
-
-          // 2️⃣ Update Firestore participant
-          await updateDoc(doc(db, "participants", participantId), {
-            paymentStatus: "success",
-            razorpayPaymentId: paymentId,
-            serialNumber: serialNumber,
+          const verificationResponse = await fetch(`${apiBaseUrl}/verify-payment`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ participantId, ...response }),
           });
-
-          // 3️⃣ Redirect to success page
-          navigate(`/payment-success/${participantId}`);
+          const verification = await verificationResponse.json();
+          if (!verificationResponse.ok || !verification.success) {
+            const details = verification.details ? ` ${verification.details}` : "";
+            const diagnostic = verification.stage
+              ? ` Stage: ${verification.stage}${verification.code ? ` (${verification.code})` : ""}.`
+              : "";
+            alert(`${verification.error || "Payment verification failed."} (HTTP ${verificationResponse.status}).${diagnostic}${details} Check the backend terminal before retrying payment.`);
+            return;
+          }
+          navigate(`/payment-success/${participantId}?payment_id=${encodeURIComponent(response.razorpay_payment_id)}`);
         },
 
         theme: { color: "#8B5CF6" },
@@ -61,7 +57,7 @@ const PaymentButton = ({ amount, participantId }) => {
       rzp.open();
     } catch (err) {
       console.error(err);
-      alert("Payment Error ❌");
+      alert(err.message || "Payment Error");
     }
   };
 

@@ -1,16 +1,37 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 const Leaderboard = () => {
-  const [sampleData] = useState([
-    { rank: 1, name: "Aarav Kumar", score: 48, school: "Delhi Public School", avatar: "AK" },
-    { rank: 2, name: "Diya Sharma", score: 45, school: "St. Mary's Convent", avatar: "DS" },
-    { rank: 3, name: "Rahul Patel", score: 43, school: "Greenwood High", avatar: "RP" },
-    { rank: 4, name: "Priya Singh", score: 41, school: "Ryan International", avatar: "PS" },
-    { rank: 5, name: "Arjun Reddy", score: 39, school: "Vidya Mandir", avatar: "AR" },
-    { rank: 6, name: "Ananya Verma", score: 38, school: "DAV Public School", avatar: "AV" },
-    { rank: 7, name: "Karthik Nair", score: 36, school: "National Public School", avatar: "KN" },
-    { rank: 8, name: "Sanya Gupta", score: 35, school: "Modern School", avatar: "SG" },
-  ]);
+  const [sampleData, setSampleData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const loadLeaderboard = async () => {
+      try {
+        const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
+        const response = await fetch(`${apiBaseUrl}/leaderboard`);
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Leaderboard load failed.");
+
+        const ranked = (result.participants || []).map((participant, index) => ({
+          id: participant.id,
+          rank: index + 1,
+          name: participant.name || "Participant",
+          score: Number(participant.score || 0),
+          school: participant.institution || "",
+          avatar: (participant.name || "P").split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase(),
+        }));
+        setSampleData(ranked);
+      } catch (loadError) {
+        console.error("Leaderboard load failed:", loadError);
+        setError("Leaderboard is temporarily unavailable.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadLeaderboard();
+  }, []);
 
   const getMedalIcon = (rank) => {
     if (rank === 1) {
@@ -70,8 +91,14 @@ const Leaderboard = () => {
           </p>
         </div>
 
+        {loading && <p className="mb-6 text-center text-gray-600">Loading leaderboard...</p>}
+        {error && <p role="alert" className="mb-6 text-center text-red-700">{error}</p>}
+        {!loading && !error && sampleData.length === 0 && (
+          <p className="mb-6 rounded-xl bg-white p-6 text-center text-gray-600">No paid participants have scores yet.</p>
+        )}
+
         {/* Top 3 Podium - Mobile & Desktop */}
-        <div className="mb-8 flex justify-center items-end gap-4 px-4">
+        {sampleData.length >= 3 && <div className="mb-8 flex justify-center items-end gap-4 px-4">
           {/* 2nd Place */}
           <div className="flex flex-col items-center flex-1 max-w-[140px]">
             <div className="relative mb-3">
@@ -131,7 +158,7 @@ const Leaderboard = () => {
             </div>
             <div className="w-full bg-gradient-to-br from-orange-400 to-orange-600 rounded-t-xl mt-3 h-20 shadow-lg"></div>
           </div>
-        </div>
+        </div>}
 
         {/* Full Leaderboard Table */}
         <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-purple-100">
@@ -205,13 +232,13 @@ const Leaderboard = () => {
           </div>
           <div className="bg-white rounded-xl p-4 text-center shadow-lg border border-purple-100">
             <p className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-orange-500 bg-clip-text text-transparent">
-              {sampleData[0].score}
+              {sampleData[0]?.score ?? 0}
             </p>
             <p className="text-xs text-gray-600 mt-1">Top Score</p>
           </div>
           <div className="bg-white rounded-xl p-4 text-center shadow-lg border border-purple-100">
             <p className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-orange-500 bg-clip-text text-transparent">
-              {Math.round(sampleData.reduce((sum, p) => sum + p.score, 0) / sampleData.length)}
+              {sampleData.length ? Math.round(sampleData.reduce((sum, p) => sum + p.score, 0) / sampleData.length) : 0}
             </p>
             <p className="text-xs text-gray-600 mt-1">Average Score</p>
           </div>

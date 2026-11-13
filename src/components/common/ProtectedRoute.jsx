@@ -5,7 +5,7 @@ import LoadingSpinner from "./LoadingSpinner";
 const ProtectedRoute = ({ user, loading, children }) => {
   if (loading) return <LoadingSpinner />;
 
-  if (!user) return <Navigate to="/committee/login" />;
+  if (!user || !["committee", "admin"].includes(user.role)) return <Navigate to="/committee/login" />;
 
   return children;
 };
