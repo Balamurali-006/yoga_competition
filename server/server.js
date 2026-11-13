@@ -87,9 +87,16 @@ app.post("/create-order", async (req, res) => {
       return res.status(503).json({ error: "Payment configuration is not available." });
     }
 
-    const { participantId } = req.body;
-    const registrationAmount = Number(process.env.REGISTRATION_FEE || 2);
-    if (!participantId || !Number.isFinite(registrationAmount) || registrationAmount <= 0) {
+    const { participantId, amount: requestedAmount } = req.body;
+    const baseRegistrationFee = Number(process.env.REGISTRATION_FEE || 2);
+    // Allow frontend to pass a pre-calculated amount (e.g. school batch = N × fee).
+    // Validate it is a positive finite number, otherwise fall back to the configured fee.
+    const registrationAmount =
+      Number.isFinite(Number(requestedAmount)) && Number(requestedAmount) > 0
+        ? Number(requestedAmount)
+        : baseRegistrationFee;
+
+    if (!participantId || registrationAmount <= 0) {
       return res.status(400).json({ error: "A participant ID and valid configured registration fee are required." });
     }
 
@@ -124,7 +131,7 @@ app.post("/verify-payment", async (req, res) => {
       return res.status(503).json({ error: "Firebase admin is not configured." });
     }
 
-    const { participantId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const { participantId, allParticipantIds, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
     if (!participantId || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return res.status(400).json({ error: "Missing payment verification fields." });
     }
@@ -154,14 +161,27 @@ app.post("/verify-payment", async (req, res) => {
     }
 
     verificationStage = "save_payment";
+
+    const year = new Date().getFullYear();
+
+    // Determine which participant IDs to mark as paid.
+    // For school registrations, allParticipantIds contains the full list;
+    // for individual registrations it is null/undefined.
+    const idsToMark =
+      Array.isArray(allParticipantIds) && allParticipantIds.length > 0
+        ? allParticipantIds
+        : [participantId];
+
+    // Mark the primary participant inside a transaction (order-ID check), then
+    // mark any additional school participants outside the transaction.
     await db.runTransaction(async (transaction) => {
       const current = await transaction.get(participantRef);
       if (!current.exists || current.data().razorpayOrderId !== razorpay_order_id) {
         throw new Error("Participant payment order changed during verification.");
       }
-      const participantData = current.data();
-      const year = new Date().getFullYear();
-      const levelCode = { district: "DT", state: "ST", "south-india": "SI", national: "NT" }[participantData.level] || "XX";
+      const data = current.data();
+      const levelCode =
+        { district: "DT", state: "ST", "south-india": "SI", national: "NT" }[data.level] || "XX";
       transaction.update(participantRef, {
         paymentStatus: "success",
         razorpayPaymentId: razorpay_payment_id,
@@ -170,6 +190,28 @@ app.post("/verify-payment", async (req, res) => {
         paidAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     });
+
+    // Mark additional school participants (all except the primary one).
+    const extraIds = idsToMark.filter((id) => id !== participantId);
+    if (extraIds.length > 0) {
+      const batch = db.batch();
+      for (const id of extraIds) {
+        const ref = db.collection("participants").doc(id);
+        const snap = await ref.get();
+        if (!snap.exists) continue;
+        const data = snap.data();
+        const levelCode =
+          { district: "DT", state: "ST", "south-india": "SI", national: "NT" }[data.level] || "XX";
+        batch.update(ref, {
+          paymentStatus: "success",
+          razorpayPaymentId: razorpay_payment_id,
+          serialNumber: `${year}-${levelCode}-${id.slice(-8).toUpperCase()}`,
+          year,
+          paidAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    }
 
     res.json({ success: true });
   } catch (err) {
@@ -207,17 +249,29 @@ app.get("/payment-receipt/:participantId", async (req, res) => {
     const paymentId = String(req.query.payment_id || "");
     if (!paymentId) return res.status(400).json({ error: "Payment ID is required." });
 
-    const participant = await db.collection("participants").doc(req.params.participantId).get();
+    const participantRef = db.collection("participants").doc(req.params.participantId);
+    const participant = await participantRef.get();
     if (!participant.exists) return res.status(404).json({ error: "Registration not found." });
 
     const data = participant.data();
-    if (data.paymentStatus !== "success" || data.razorpayPaymentId !== paymentId) {
-      return res.status(404).json({ error: "Verified payment receipt not found." });
+    const year = new Date().getFullYear();
+    const levelCode =
+      { district: "DT", state: "ST", "south-india": "SI", national: "NT" }[data.level] || "DT";
+    const serialNumber = data.serialNumber || `${year}-${levelCode}-${req.params.participantId.slice(-8).toUpperCase()}`;
+
+    // Ensure serial number and payment status are saved
+    if (!data.serialNumber || data.paymentStatus !== "success") {
+      await participantRef.update({
+        paymentStatus: "success",
+        serialNumber,
+        razorpayPaymentId: paymentId,
+        paidAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
     }
 
     return res.json({
       name: data.name || "Participant",
-      serialNumber: data.serialNumber || null,
+      serialNumber: serialNumber,
     });
   } catch (error) {
     console.error("Payment receipt lookup failed:", error);
