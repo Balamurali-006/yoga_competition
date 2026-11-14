@@ -2,6 +2,10 @@
 
 A full-stack web application for managing an international Yoga competition. Covers public registration (individual & school/group), Razorpay payment processing, committee-based participant verification and scoring, a live leaderboard, and a complete admin back-office — all backed by Firebase.
 
+## Current Project Status
+
+The app is in a functional, feature-complete state for the competition workflow described below. The frontend build succeeds and the React test suite passes. The backend has also been hardened so it can be imported safely in local/test environments without crashing when Firebase or Razorpay configuration is absent; payment and admin routes respond with explicit 503/401/403 responses instead of failing during app startup.
+
 ---
 
 ## Tech Stack
@@ -243,7 +247,7 @@ RAZORPAY_KEY_SECRET=your_key_secret
 FIREBASE_SERVICE_ACCOUNT={"type":"service_account",...}
 ```
 
-Or place a `serviceAccountKey.json` file in the `server/` folder.
+Or place a `serviceAccountKey.json` file in the `server/` folder. The server is intentionally safe to import in local/test environments without these values, but live payment and admin routes require valid Firebase and Razorpay configuration.
 
 ### 5. Start the backend
 
