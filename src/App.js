@@ -13,6 +13,7 @@ import IndividualRegistration from "./pages/IndividualRegistration";
 import SchoolRegistration from "./pages/SchoolRegistration";
 import PaymentPage from "./pages/PaymentPage";
 import RegistrationStatus from "./pages/RegistrationStatus";
+import Validation from "./pages/Validation";
 
 /* COMMITTEE PAGES */
 import CommitteeLogin from "./pages/committee/CommitteeLogin";
@@ -56,6 +57,10 @@ function App() {
         <Route path="/school-registration" element={<SchoolRegistration />} />
         <Route path="/payment" element={<PaymentPage />} />
         <Route path="/status" element={<RegistrationStatus />} />
+
+        {/* VALIDATION MODULE */}
+        <Route path="/validation" element={<Validation user={authUser} />} />
+        <Route path="/validation/login" element={<Validation user={authUser} />} />
 
         {/* COMMITTEE ROUTES */}
         <Route path="/committee/login" element={<CommitteeLogin />} />
