@@ -7,10 +7,12 @@ const PaymentButton = ({ amount, participantId }) => {
   const handlePayment = async () => {
     try {
       const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
+      const numericAmount = Number(amount) || 2;
+
       const res = await fetch(`${apiBaseUrl}/create-order`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, participantId }),
+        body: JSON.stringify({ amount: numericAmount, participantId }),
       });
 
       const order = await res.json();
@@ -19,19 +21,36 @@ const PaymentButton = ({ amount, participantId }) => {
         throw new Error(order.error || "Error creating order");
       }
 
+      // Safeguard: check if order amount matches requested amount
+      const expectedPaise = Math.round(numericAmount * 100);
+      if (order.amount !== expectedPaise) {
+        console.warn(
+          `Order amount mismatch: Expected ${expectedPaise} paise (₹${numericAmount}), but server created order for ${order.amount} paise (₹${order.amount / 100}). The backend server needs to be restarted.`
+        );
+      }
+
       const options = {
         key: process.env.REACT_APP_RAZORPAY_KEY,
         amount: order.amount,
         currency: "INR",
         name: "Ekadhma Yoga Association",
-        description: "Registration Fee",
+        description: `Registration Fee (₹${order.amount / 100})`,
         order_id: order.id,
 
         handler: async function (response) {
+          // For school registrations, include all participant IDs so the
+          // server can mark every student as paid in one go.
+          const storedIds = sessionStorage.getItem("schoolParticipantIds");
+          const allParticipantIds = storedIds ? JSON.parse(storedIds) : null;
+
           const verificationResponse = await fetch(`${apiBaseUrl}/verify-payment`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ participantId, ...response }),
+            body: JSON.stringify({
+              participantId,
+              allParticipantIds, // null for individual, array for school
+              ...response,
+            }),
           });
           const verification = await verificationResponse.json();
           if (!verificationResponse.ok || !verification.success) {
@@ -64,7 +83,7 @@ const PaymentButton = ({ amount, participantId }) => {
   return (
     <button
       onClick={handlePayment}
-      className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-3 rounded-lg font-semibold"
+      className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-3 rounded-lg font-semibold shadow-md hover:shadow-lg transition-all"
     >
       Pay ₹{amount}
     </button>

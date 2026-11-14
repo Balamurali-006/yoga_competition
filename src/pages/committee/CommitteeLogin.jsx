@@ -1,8 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../../firebase/firebaseConfig";
-import { login } from "../../firebase/auth";
+import { login, setCustomAuthUser } from "../../firebase/auth";
 
 const CommitteeLogin = () => {
   const navigate = useNavigate();
@@ -19,22 +17,33 @@ const CommitteeLogin = () => {
     setLoading(true);
     setError("");
 
-    try {
-      const userCredential = await login(form.email, form.password);
-      const userDoc = await getDoc(doc(db, "users", userCredential.user.uid));
-      const role = userDoc.exists() ? userDoc.data().role : null;
+    const emailTrimmed = form.email.trim().toLowerCase();
+    const passwordTrimmed = form.password;
 
-      if (role !== "committee" && role !== "admin") {
-        throw new Error("This account is not authorized for committee access.");
-      }
-
-      navigate(role === "admin" ? "/admin/dashboard" : "/committee/verify");
-    } catch (err) {
-      console.error(err);
-      setError(err.message || "Login failed. Please check your credentials.");
-    } finally {
+    // Strict validation: Only committeeuser@gmail.com and password "admin" are allowed
+    if (emailTrimmed !== "committeeuser@gmail.com" || passwordTrimmed !== "admin") {
+      setError("Invalid credentials. Only committeeuser@gmail.com is authorized.");
       setLoading(false);
+      return;
     }
+
+    try {
+      // Attempt Firebase login if account exists in Firebase Auth
+      await login(form.email.trim(), form.password);
+    } catch (err) {
+      // If Firebase Auth does not have this account or fails,
+      // session is authenticated locally for the verified committee user
+    }
+
+    setCustomAuthUser({
+      uid: "committeeuser",
+      email: "committeeuser@gmail.com",
+      role: "committee",
+      displayName: "Committee Member",
+    });
+
+    navigate("/committee/verify");
+    setLoading(false);
   };
 
   return (
@@ -43,7 +52,7 @@ const CommitteeLogin = () => {
         <div className="text-center mb-6">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-purple-600 to-orange-500 text-3xl">🧘</div>
           <h1 className="mt-4 text-3xl font-bold text-purple-700">Committee Login</h1>
-          <p className="mt-2 text-sm text-gray-600">Signed-in committee members can verify registrations and score entries.</p>
+          <p className="mt-2 text-sm text-gray-600">Access restricted to authorized committee members.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -55,7 +64,7 @@ const CommitteeLogin = () => {
               value={form.email}
               onChange={handleChange}
               className="w-full rounded-xl border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
-              placeholder="committee@ekadhma.com"
+              placeholder="committeeuser@gmail.com"
               required
             />
           </div>
@@ -82,7 +91,7 @@ const CommitteeLogin = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-orange-500 px-4 py-3 font-semibold text-white disabled:opacity-60"
+            className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-orange-500 px-4 py-3 font-semibold text-white disabled:opacity-60 hover:opacity-95 transition-opacity"
           >
             {loading ? "Signing in..." : "Login"}
           </button>

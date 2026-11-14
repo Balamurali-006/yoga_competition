@@ -25,7 +25,6 @@ const Navbar = () => {
     { path: "/", label: "Home", icon: "🏠" },
     { path: "/register", label: "Register", icon: "📝" },
     { path: "/school-registration", label: "School Entry", icon: "🏫" },
-    { path: "/leaderboard", label: "Leaderboard", icon: "🏆" },
     { path: "/committee/login", label: "Committee", icon: "👥" },
   ];
 
