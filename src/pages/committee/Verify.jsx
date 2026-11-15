@@ -80,7 +80,7 @@ const Verify = () => {
     setVisitedMap(initial);
     setHasVisitedChanges(false);
     setVisitedMessage("");
-  }, [selectedInstructor, participantsList]);
+  }, [selectedInstructor, instructorStudents]);
 
   // Count how many students under the current filter are marked visited
   const visitedCount = useMemo(() => {

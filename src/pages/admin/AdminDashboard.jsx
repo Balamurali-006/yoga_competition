@@ -68,6 +68,10 @@ const AdminDashboard = () => {
               <h2 className="font-bold text-purple-700">Competition Check-in</h2>
               <p className="mt-1 text-sm text-gray-600">Scan participant QR codes or check in by serial number.</p>
             </Link>
+            <Link to="/admin/results" className="rounded-2xl bg-white p-5 shadow-lg transition hover:-translate-y-1">
+              <h2 className="font-bold text-purple-700">Competition Results</h2>
+              <p className="mt-1 text-sm text-gray-600">View saved scores and prize places, with results filtered by instructor.</p>
+            </Link>
           </div>
           </>
         )}

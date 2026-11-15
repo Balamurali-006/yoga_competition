@@ -25,6 +25,7 @@ import ScoreEntry from "./pages/committee/ScoreEntry";
 
 /* ADMIN PAGES */
 import AdminDashboard from "./pages/admin/AdminDashboard";
+import AdminResults from "./pages/admin/AdminResults";
 import ManageEvents from "./pages/admin/ManageEvents";
 import ManageCategories from "./pages/admin/ManageCategories";
 import ManageAgeGroups from "./pages/admin/ManageAgeGroups";
@@ -79,6 +80,7 @@ function App() {
         <Route path="/admin/participants" element={<AdminRoute user={authUser} loading={authLoading}><ManageParticipants /></AdminRoute>} />
         <Route path="/admin/users" element={<AdminRoute user={authUser} loading={authLoading}><ManageUsers /></AdminRoute>} />
         <Route path="/admin/leaderboard" element={<AdminRoute user={authUser} loading={authLoading}><AdminLeaderboard /></AdminRoute>} />
+        <Route path="/admin/results" element={<AdminRoute user={authUser} loading={authLoading}><AdminResults /></AdminRoute>} />
         <Route path="/admin/upi-payments" element={<AdminRoute user={authUser} loading={authLoading}><AdminUpiPayments /></AdminRoute>} />
         <Route path="/admin/check-in" element={<AdminRoute user={authUser} loading={authLoading}><AdminCheckIn /></AdminRoute>} />
 

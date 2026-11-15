@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../firebase/firebaseConfig";
-import { login } from "../../firebase/auth";
+import { login, logout } from "../../firebase/auth";
 
 const AdminLogin = () => {
   const navigate = useNavigate();
@@ -31,6 +31,7 @@ const AdminLogin = () => {
       const role = userDoc.exists() ? userDoc.data().role : null;
 
       if (role !== "admin") {
+        await logout();
         throw new Error("This account is not authorized for admin access. Create the Firebase user and set Firestore users/{uid}.role to \"admin\".");
       }
 

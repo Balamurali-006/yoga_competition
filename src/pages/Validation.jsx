@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { doc, setDoc, updateDoc } from "firebase/firestore";
-import { db } from "../firebase/firebaseConfig";
+import { doc, getDoc, writeBatch } from "firebase/firestore";
+import { auth, db } from "../firebase/firebaseConfig";
 import { subscribeToCollection } from "../firebase/firestore";
-import { login, setCustomAuthUser, logout } from "../firebase/auth";
+import { login, logout } from "../firebase/auth";
+import { getPrizeForScore } from "../utils/prize";
 
 const Validation = ({ user }) => {
-  // Authentication State
-  const [currentUser, setCurrentUser] = useState(user || null);
+  const [currentUser, setCurrentUser] = useState(null);
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
   const [loginError, setLoginError] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
@@ -15,36 +15,37 @@ const Validation = ({ user }) => {
   const [participants, setParticipants] = useState([]);
   const [loadingParticipants, setLoadingParticipants] = useState(true);
   const [savedScoresMap, setSavedScoresMap] = useState({});
+  const [dataError, setDataError] = useState("");
 
   // Filter State
-  const [selectedInstructor, setSelectedInstructor] = useState("");
-  const [selectedInstitution, setSelectedInstitution] = useState("");
+  const [selectedClass, setSelectedClass] = useState("");
 
-  // In-memory score edits: { [participantId]: { asana1: "", asana2: "", asana3: "", asana4: "", asana5: "", position: "" } }
+  // In-memory score edits: { [participantId]: { asana1: "", asana2: "", asana3: "", asana4: "", asana5: "" } }
   const [scoreInputs, setScoreInputs] = useState({});
   const [saveStatusMap, setSaveStatusMap] = useState({});
   const [savingId, setSavingId] = useState(null);
 
-  // Sync auth state if user prop changes or custom auth in sessionStorage
+  // Only a Firebase-authenticated staff account can read or write score data.
   useEffect(() => {
-    if (user && ["committee", "admin"].includes(user.role)) {
+    if (user && auth.currentUser && ["committee", "admin"].includes(user.role)) {
       setCurrentUser(user);
     } else {
-      const stored = sessionStorage.getItem("customAuthUser");
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          if (["committee", "admin"].includes(parsed.role)) {
-            setCurrentUser(parsed);
-          }
-        } catch (e) {}
-      }
+      setCurrentUser(null);
     }
   }, [user]);
 
-  // Subscribe to participants from Firestore
+  // Subscribe to participants and saved scorecards from Firestore.
   useEffect(() => {
-    const unsubscribe = subscribeToCollection(
+    if (!currentUser || !auth.currentUser) {
+      setParticipants([]);
+      setSavedScoresMap({});
+      setLoadingParticipants(false);
+      return undefined;
+    }
+
+    setLoadingParticipants(true);
+    setDataError("");
+    const unsubscribeParticipants = subscribeToCollection(
       "participants",
       (items) => {
         setParticipants(items || []);
@@ -52,15 +53,11 @@ const Validation = ({ user }) => {
       },
       (err) => {
         console.error("Failed to load participants:", err);
+        setDataError("Could not load participants. Confirm your Firebase staff role and Firestore rules.");
         setLoadingParticipants(false);
       }
     );
-    return () => unsubscribe();
-  }, []);
-
-  // Subscribe to scores collection from Firestore
-  useEffect(() => {
-    const unsubscribe = subscribeToCollection(
+    const unsubscribeScores = subscribeToCollection(
       "scores",
       (items) => {
         const map = {};
@@ -71,10 +68,14 @@ const Validation = ({ user }) => {
       },
       (err) => {
         console.error("Failed to load scores:", err);
+        setDataError("Could not load saved scorecards. Confirm your Firebase staff role and Firestore rules.");
       }
     );
-    return () => unsubscribe();
-  }, []);
+    return () => {
+      unsubscribeParticipants();
+      unsubscribeScores();
+    };
+  }, [currentUser]);
 
   // When saved scores or participants load, pre-fill score inputs with existing scores
   useEffect(() => {
@@ -82,16 +83,24 @@ const Validation = ({ user }) => {
       const next = { ...prev };
       participants.forEach((p) => {
         const saved = savedScoresMap[p.id];
-        if (saved && !next[p.id]) {
+        if (saved) {
           const scoresArr = Array.isArray(saved.scores) ? saved.scores : [];
-          next[p.id] = {
+          const savedInputs = {
             asana1: saved.asana1 ?? scoresArr[0] ?? "",
             asana2: saved.asana2 ?? scoresArr[1] ?? "",
             asana3: saved.asana3 ?? scoresArr[2] ?? "",
             asana4: saved.asana4 ?? scoresArr[3] ?? "",
             asana5: saved.asana5 ?? scoresArr[4] ?? "",
-            position: saved.position || "",
           };
+          const currentInputs = next[p.id] || {};
+          next[p.id] = Object.fromEntries(
+            Object.entries(savedInputs).map(([field, value]) => [
+              field,
+              currentInputs[field] === undefined || currentInputs[field] === ""
+                ? value
+                : currentInputs[field],
+            ])
+          );
         } else if (!next[p.id]) {
           const scoresArr = Array.isArray(p.scores) ? p.scores : [];
           next[p.id] = {
@@ -100,7 +109,6 @@ const Validation = ({ user }) => {
             asana3: scoresArr[2] ?? "",
             asana4: scoresArr[3] ?? "",
             asana5: scoresArr[4] ?? "",
-            position: p.position || "",
           };
         }
       });
@@ -108,40 +116,22 @@ const Validation = ({ user }) => {
     });
   }, [participants, savedScoresMap]);
 
-  // Extract unique instructors from database participants
-  const instructors = useMemo(() => {
+  // Extract unique classes from database participants.
+  const classes = useMemo(() => {
     const set = new Set();
     participants.forEach((p) => {
-      if (p.instructor && typeof p.instructor === "string" && p.instructor.trim()) {
-        set.add(p.instructor.trim());
-      }
+      if (p.class && typeof p.class === "string" && p.class.trim()) set.add(p.class.trim());
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [participants]);
 
-  // Extract unique institutions from database participants
-  const institutions = useMemo(() => {
-    const set = new Set();
-    participants.forEach((p) => {
-      if (p.institution && typeof p.institution === "string" && p.institution.trim()) {
-        set.add(p.institution.trim());
-      }
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [participants]);
-
-  // Filter students by selected instructor AND selected institution
+  // Filter students only by their class/grade.
   const filteredStudents = useMemo(() => {
-    return participants.filter((p) => {
-      const matchInstructor =
-        !selectedInstructor ||
-        (p.instructor || "").trim().toLowerCase() === selectedInstructor.trim().toLowerCase();
-      const matchInstitution =
-        !selectedInstitution ||
-        (p.institution || "").trim().toLowerCase() === selectedInstitution.trim().toLowerCase();
-      return matchInstructor && matchInstitution;
-    });
-  }, [participants, selectedInstructor, selectedInstitution]);
+    if (!selectedClass) return participants;
+    return participants.filter(
+      (participant) => (participant.class || "").trim().toLowerCase() === selectedClass.toLowerCase()
+    );
+  }, [participants, selectedClass]);
 
   // Handle Login
   const handleLoginSubmit = async (e) => {
@@ -149,31 +139,24 @@ const Validation = ({ user }) => {
     setLoggingIn(true);
     setLoginError("");
 
-    const emailTrimmed = loginForm.email.trim().toLowerCase();
-    const passwordTrimmed = loginForm.password;
-
-    // Strict authentication: same as committee login
-    if (emailTrimmed !== "committeeuser@gmail.com" || passwordTrimmed !== "admin") {
-      setLoginError("Invalid credentials. Only committeeuser@gmail.com is authorized.");
-      setLoggingIn(false);
-      return;
-    }
-
     try {
-      await login(loginForm.email.trim(), loginForm.password);
-    } catch (e) {
-      // Local verified fallback
-    }
+      const credential = await login(loginForm.email.trim(), loginForm.password);
+      const signedInUser = credential?.user;
+      if (!signedInUser) throw new Error("Firebase did not return a signed-in user.");
 
-    const authUserObj = {
-      uid: "committeeuser",
-      email: "committeeuser@gmail.com",
-      role: "committee",
-      displayName: "Committee Member",
-    };
-    setCustomAuthUser(authUserObj);
-    setCurrentUser(authUserObj);
-    setLoggingIn(false);
+      const profile = await getDoc(doc(db, "users", signedInUser.uid));
+      const role = profile.exists() ? profile.data().role : null;
+      if (!["committee", "admin"].includes(role)) {
+        await logout();
+        throw new Error("This account needs a Firestore users/{uid} document with role 'committee' or 'admin'.");
+      }
+
+      setCurrentUser({ ...signedInUser, role });
+    } catch (error) {
+      setLoginError(error.message || "Could not sign in to the validation page.");
+    } finally {
+      setLoggingIn(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -253,6 +236,7 @@ const Validation = ({ user }) => {
       const totalScore = Math.round((s1 + s2 + s3 + s4 + s5) * 100) / 100;
       const timestamp = new Date().toISOString();
 
+      const prize = getPrizeForScore(totalScore);
       const scoreData = {
         participantId: studentId,
         studentName: student.name || "",
@@ -271,26 +255,27 @@ const Validation = ({ user }) => {
         asana5: s5,
         scores: [s1, s2, s3, s4, s5],
         total: totalScore,
-        position: scores.position || "",
+        prize,
+        position: prize,
         updatedAt: timestamp,
         savedAt: timestamp,
         evaluatedBy: currentUser?.email || "committeeuser@gmail.com",
       };
 
-      // 1. Store in 'scores' collection
-      await setDoc(doc(db, "scores", studentId), scoreData);
-
-      // 2. Also update participant document with scores and score
-      await updateDoc(doc(db, "participants", studentId), {
+      const batch = writeBatch(db);
+      batch.set(doc(db, "scores", studentId), scoreData);
+      batch.update(doc(db, "participants", studentId), {
         score: totalScore,
         scores: [s1, s2, s3, s4, s5],
-        position: scores.position || "",
+        prize,
+        position: prize,
         scoreUpdatedAt: timestamp,
       });
+      await batch.commit();
 
       setSaveStatusMap((prev) => ({
         ...prev,
-        [studentId]: { success: `✓ Saved! Total: ${totalScore} / 50` },
+        [studentId]: { success: `✓ Saved! Total: ${totalScore} / 50 — ${prize}` },
       }));
     } catch (err) {
       console.error(`Failed to save scores for student ${studentId}:`, err);
@@ -382,7 +367,7 @@ const Validation = ({ user }) => {
               </h1>
             </div>
             <p className="text-gray-600 mt-1 text-sm md:text-base">
-              Filter students by instructor and institution, enter scores across 5 Asanas (out of 10), and save official scorecards.
+              Filter students by class, enter scores across 5 Asanas (out of 10), and save official scorecards.
             </p>
           </div>
           <button
@@ -393,6 +378,12 @@ const Validation = ({ user }) => {
           </button>
         </div>
 
+        {dataError && (
+          <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {dataError}
+          </p>
+        )}
+
         {/* Filters Section */}
         <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 border border-purple-100">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -400,47 +391,23 @@ const Validation = ({ user }) => {
             <span>Filter Participants</span>
           </h2>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Filter by Instructor */}
-            <div>
+          <div className="grid grid-cols-1 gap-4">
+            <div className="max-w-xl">
               <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Filter by Instructor:
+                Filter by Class:
               </label>
               {loadingParticipants ? (
-                <div className="text-sm text-gray-500 py-2">Loading instructors...</div>
+                <div className="text-sm text-gray-500 py-2">Loading classes...</div>
               ) : (
                 <select
-                  value={selectedInstructor}
-                  onChange={(e) => setSelectedInstructor(e.target.value)}
+                  value={selectedClass}
+                  onChange={(e) => setSelectedClass(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-purple-500 focus:outline-none bg-white text-gray-800 text-sm md:text-base shadow-sm font-medium"
                 >
-                  <option value="">-- All Instructors --</option>
-                  {instructors.map((inst) => (
-                    <option key={inst} value={inst}>
-                      {inst}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-
-            {/* Filter by Institution */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Filter by Institution:
-              </label>
-              {loadingParticipants ? (
-                <div className="text-sm text-gray-500 py-2">Loading institutions...</div>
-              ) : (
-                <select
-                  value={selectedInstitution}
-                  onChange={(e) => setSelectedInstitution(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-purple-500 focus:outline-none bg-white text-gray-800 text-sm md:text-base shadow-sm font-medium"
-                >
-                  <option value="">-- All Institutions --</option>
-                  {institutions.map((inst) => (
-                    <option key={inst} value={inst}>
-                      {inst}
+                  <option value="">-- All Classes --</option>
+                  {classes.map((className) => (
+                    <option key={className} value={className}>
+                      {className}
                     </option>
                   ))}
                 </select>
@@ -452,17 +419,13 @@ const Validation = ({ user }) => {
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-gray-100">
             <div className="text-sm text-gray-600 font-medium">
               Showing <span className="font-bold text-purple-700">{filteredStudents.length}</span> students matching filter
-              {selectedInstructor && <span> · Instructor: <strong className="text-gray-800">{selectedInstructor}</strong></span>}
-              {selectedInstitution && <span> · Institution: <strong className="text-gray-800">{selectedInstitution}</strong></span>}
+              {selectedClass && <span> · Class: <strong className="text-gray-800">{selectedClass}</strong></span>}
             </div>
 
-            {(selectedInstructor || selectedInstitution) && (
+            {selectedClass && (
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedInstructor("");
-                  setSelectedInstitution("");
-                }}
+                onClick={() => setSelectedClass("")}
                 className="text-xs text-purple-600 hover:text-purple-800 font-bold underline"
               >
                 Clear Filters
@@ -482,7 +445,7 @@ const Validation = ({ user }) => {
             <div className="text-center py-12 bg-white rounded-3xl shadow-xl p-8 border border-purple-100">
               <span className="text-4xl block mb-2">🧘</span>
               <p className="text-gray-600 font-semibold text-lg">
-                No students found matching the selected instructor/institution filters.
+                No students found for the selected class.
               </p>
               <p className="text-gray-500 text-sm mt-1">
                 Try selecting a different filter option or clear the filters above.
@@ -495,6 +458,16 @@ const Validation = ({ user }) => {
               const isSaving = savingId === student.id;
               const status = saveStatusMap[student.id];
               const isAlreadySaved = !!savedScoresMap[student.id];
+              const scoreValues = [
+                studentScores.asana1,
+                studentScores.asana2,
+                studentScores.asana3,
+                studentScores.asana4,
+                studentScores.asana5,
+              ];
+              const currentPrize = scoreValues.every(
+                (value) => value !== "" && Number.isFinite(Number(value))
+              ) ? getPrizeForScore(currentTotal) : "";
 
               return (
                 <div
@@ -534,6 +507,9 @@ const Validation = ({ user }) => {
                         <span className="text-xs text-gray-500 block font-semibold">Total Score</span>
                         <span className="text-xl font-extrabold text-purple-700">
                           {currentTotal !== "" ? `${currentTotal} / 50` : "— / 50"}
+                        </span>
+                        <span className="mt-1 block text-sm font-bold text-orange-700">
+                          {currentPrize || savedScoresMap[student.id]?.prize || savedScoresMap[student.id]?.position || "Prize pending"}
                         </span>
                       </div>
                     </div>
@@ -644,17 +620,13 @@ const Validation = ({ user }) => {
                       </table>
                     </div>
 
-                    {/* Position / Rank Row (as shown in image) */}
+                    {/* Prize is assigned automatically from the completed total. */}
                     <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-3 border-t border-gray-300">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-gray-700 text-sm">Position :</span>
-                        <input
-                          type="text"
-                          placeholder="e.g. 1st, 2nd, 3rd, Consolation"
-                          value={studentScores.position || ""}
-                          onChange={(e) => handleScoreChange(student.id, "position", e.target.value)}
-                          className="px-3 py-1.5 border-b-2 border-gray-400 focus:border-purple-600 focus:outline-none bg-transparent text-sm font-semibold text-gray-800 w-48"
-                        />
+                        <span className="font-semibold text-gray-700 text-sm">Prize:</span>
+                        <span className="text-sm font-bold text-purple-700">
+                          {currentPrize || savedScoresMap[student.id]?.prize || savedScoresMap[student.id]?.position || "Enter all five scores"}
+                        </span>
                       </div>
 
                       {/* Save Changes Button for this Student */}

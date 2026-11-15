@@ -52,6 +52,7 @@ Screenshots are optional and are only reference material. If storage is not conf
 ## Firestore data
 
 - `participants`: existing participant records, with server-managed `paymentStatus`, `registrationStatus`, serial number, check-in data, and `paymentGroupId`.
+- `scores`: staff-managed scorecards with the five Asana scores, total, and automatically assigned prize place.
 - `upiPayments`: a payment record per individual or school/group payment.
 - `paymentReferenceCounters`: transactionally allocates a unique six-digit payment reference for each payment group.
 - `upiUtrClaims`: hash-keyed UTR claims for atomic duplicate prevention.

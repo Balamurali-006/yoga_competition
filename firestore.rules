@@ -32,8 +32,22 @@ service cloud.firestore {
       allow get, list: if isStaff();
       allow update: if adminCanUpdateParticipant() || (userRole() == 'committee'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'scores', 'score', 'scoredAt', 'verificationStatus', 'verifiedAt'
+          'scores', 'score', 'scoredAt', 'scoreUpdatedAt', 'position', 'prize',
+          'verificationStatus', 'verifiedAt'
         ]));
+      allow delete: if isAdmin();
+    }
+
+    match /scores/{participantId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff()
+        && request.resource.data.participantId == participantId
+        && request.resource.data.keys().hasOnly([
+          'participantId', 'studentName', 'serialNumber', 'instructor', 'institution',
+          'event', 'category', 'level', 'gender', 'class', 'asana1', 'asana2',
+          'asana3', 'asana4', 'asana5', 'scores', 'total', 'position', 'prize',
+          'updatedAt', 'savedAt', 'evaluatedBy'
+        ]);
       allow delete: if isAdmin();
     }
 
