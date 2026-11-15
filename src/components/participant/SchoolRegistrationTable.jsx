@@ -1,9 +1,6 @@
 import React, { useState } from "react";
-import { collection, doc, serverTimestamp, writeBatch } from "firebase/firestore";
-import { db } from "../../firebase/firebaseConfig";
 import { useNavigate } from "react-router-dom";
-
-const FEE_PER_STUDENT = Number(process.env.REACT_APP_REGISTRATION_FEE || 2);
+import { saveRegistrationAccess, upiApiRequest } from "../../firebase/upiApi";
 
 const emptyStudent = () => ({
   name: "",
@@ -15,6 +12,30 @@ const emptyStudent = () => ({
   level: "district",
 });
 
+const demoStudentNames = [
+  "Aarav Sharma",
+  "Diya Patel",
+  "Vihaan Nair",
+  "Meera Iyer",
+  "Kabir Singh",
+  "Ananya Rao",
+  "Rohan Verma",
+  "Saanvi Joshi",
+  "Aditya Kumar",
+  "Ishita Das",
+];
+
+const buildDemoStudents = () =>
+  demoStudentNames.map((name, index) => ({
+    name,
+    age: String(11 + (index % 5)),
+    gender: index % 2 === 0 ? "male" : "female",
+    class: ["6th", "7th", "8th", "9th", "10th"][index % 5],
+    event: "district",
+    category: index % 2 === 0 ? "group" : "forward",
+    level: "district",
+  }));
+
 const selectClass =
   "w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition-all bg-white text-gray-800";
 
@@ -23,13 +44,41 @@ const inputClass =
 
 const SchoolRegistrationTable = () => {
   const navigate = useNavigate();
-  const [students, setStudents] = useState([emptyStudent()]);
-  const [institution, setInstitution] = useState("");
-  const [instructor, setInstructor] = useState("");
-  const [instructorPhone, setInstructorPhone] = useState("");
-  const [email, setEmail] = useState("");
+  const [students, setStudents] = useState(() =>
+    process.env.NODE_ENV === "development" ? buildDemoStudents() : [emptyStudent()]
+  );
+  const [institution, setInstitution] = useState(
+    process.env.NODE_ENV === "development" ? "Green Valley Academy" : ""
+  );
+  const [instructor, setInstructor] = useState(
+    process.env.NODE_ENV === "development" ? "Ravi Sharma" : ""
+  );
+  const [instructorPhone, setInstructorPhone] = useState(
+    process.env.NODE_ENV === "development" ? "9876543210" : ""
+  );
+  const [email, setEmail] = useState(
+    process.env.NODE_ENV === "development" ? "school.test@example.com" : ""
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const fillDemoData = () => {
+    setStudents(buildDemoStudents());
+    setInstitution("Green Valley Academy");
+    setInstructor("Ravi Sharma");
+    setInstructorPhone("9876543210");
+    setEmail("school.test@example.com");
+    setError("");
+  };
+
+  const clearForm = () => {
+    setStudents([emptyStudent()]);
+    setInstitution("");
+    setInstructor("");
+    setInstructorPhone("");
+    setEmail("");
+    setError("");
+  };
 
   const handleChange = (index, e) => {
     const updated = [...students];
@@ -71,59 +120,29 @@ const SchoolRegistrationTable = () => {
     setSaving(true);
     setError("");
     try {
-      const batch = writeBatch(db);
-      const participantIds = validStudents.map((student) => {
-        const participantRef = doc(collection(db, "participants"));
-        batch.set(participantRef, {
-          name: student.name.trim(),
-          age: Number(student.age),
-          gender: student.gender,
-          class: student.class.trim(),
-          institution: institution.trim(),
-          instructor: instructor.trim(),
-          instructorPhone: instructorPhone.replace(/\D/g, ""),
-          email: email.trim(),
-          event: student.event,
-          category: student.category,
-          level: student.level,
-          paymentStatus: "pending",
-          serialNumber: null,
-          createdAt: serverTimestamp(),
-          registrationType: "school",
-        });
-        return participantRef.id;
-      });
-
-      await batch.commit();
-
-      // Store all participant IDs and metadata so the payment-success page lists every student's name and serial number
-      sessionStorage.setItem(
-        "schoolParticipantIds",
-        JSON.stringify(participantIds)
-      );
-      sessionStorage.setItem(
-        "schoolParticipantsData",
-        JSON.stringify(
-          validStudents.map((student, idx) => ({
-            id: participantIds[idx],
+      const registration = await upiApiRequest("/api/registrations/batch", {
+        method: "POST",
+        body: JSON.stringify({
+          participants: validStudents.map((student) => ({
             name: student.name.trim(),
-            level: student.level,
+            age: Number(student.age),
+            gender: student.gender,
+            class: student.class.trim(),
             institution: institution.trim(),
             instructor: instructor.trim(),
-          }))
-        )
-      );
-
-      const totalAmount = validStudents.length * FEE_PER_STUDENT;
-      // Navigate to the first participant's payment page with total amount as query param
-      navigate(
-        `/pay/${participantIds[0]}?schoolTotal=${totalAmount}&schoolCount=${validStudents.length}`
-      );
+            instructorPhone: instructorPhone.replace(/\D/g, ""),
+            email: email.trim(),
+            event: student.event,
+            category: student.category,
+            level: student.level,
+          })),
+        }),
+      });
+      saveRegistrationAccess(registration.paymentGroupId, registration.accessToken);
+      navigate(`/upi-payment/${registration.paymentGroupId}`);
     } catch (submitError) {
       console.error("Group registration failed:", submitError);
-      setError(
-        "Could not save group registrations. Please check your connection and try again."
-      );
+      setError(submitError.message || "Could not save group registrations.");
     } finally {
       setSaving(false);
     }
@@ -132,8 +151,6 @@ const SchoolRegistrationTable = () => {
   const isFormValid = students.some(
     (s) => s.name && s.age && s.gender && s.class
   );
-  const totalAmount = students.length * FEE_PER_STUDENT;
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-orange-50 to-purple-50 p-4 md:p-8">
       <div className="max-w-3xl mx-auto">
@@ -163,6 +180,25 @@ const SchoolRegistrationTable = () => {
         </div>
 
         <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-purple-100">
+          {process.env.NODE_ENV === "development" && (
+            <div className="flex flex-wrap justify-end gap-3 border-b border-gray-200 p-4">
+              <button
+                type="button"
+                onClick={fillDemoData}
+                className="px-4 py-2 rounded-lg bg-purple-100 text-purple-700 font-medium hover:bg-purple-200 transition-colors"
+              >
+                Load 10 Demo Students
+              </button>
+              <button
+                type="button"
+                onClick={clearForm}
+                className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-medium hover:bg-gray-200 transition-colors"
+              >
+                Clear Form
+              </button>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit}>
             {/* Institution Details */}
             <div className="grid gap-4 border-b border-gray-200 p-6 md:grid-cols-2">
@@ -395,9 +431,7 @@ const SchoolRegistrationTable = () => {
                   <span>
                     {students.length} student{students.length !== 1 ? "s" : ""}
                   </span>
-                  <span className="text-purple-700 font-bold">
-                    · Total: ₹{totalAmount}
-                  </span>
+                  <span className="text-purple-700 font-bold">· Fee shown at payment</span>
                 </div>
 
                 <button

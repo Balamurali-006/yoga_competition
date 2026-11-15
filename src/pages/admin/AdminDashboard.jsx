@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../firebase/firebaseConfig";
+import { Link } from "react-router-dom";
 
 const AdminDashboard = () => {
   const [stats, setStats] = useState({ participants: 0, users: 0, events: 0, categories: 0 });
@@ -43,6 +44,7 @@ const AdminDashboard = () => {
         {loading ? (
           <div className="text-gray-600">Loading dashboard...</div>
         ) : (
+          <>
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
             {[
               { label: "Participants", value: stats.participants, color: "from-purple-600 to-purple-500" },
@@ -57,6 +59,21 @@ const AdminDashboard = () => {
               </div>
             ))}
           </div>
+          <div className="mt-8 grid gap-4 md:grid-cols-2">
+            <Link to="/admin/upi-payments" className="rounded-2xl bg-white p-5 shadow-lg transition hover:-translate-y-1">
+              <h2 className="font-bold text-purple-700">UPI Payment Verification</h2>
+              <p className="mt-1 text-sm text-gray-600">Review UTR submissions and verify them against bank records.</p>
+            </Link>
+            <Link to="/admin/check-in" className="rounded-2xl bg-white p-5 shadow-lg transition hover:-translate-y-1">
+              <h2 className="font-bold text-purple-700">Competition Check-in</h2>
+              <p className="mt-1 text-sm text-gray-600">Scan participant QR codes or check in by serial number.</p>
+            </Link>
+            <Link to="/admin/results" className="rounded-2xl bg-white p-5 shadow-lg transition hover:-translate-y-1">
+              <h2 className="font-bold text-purple-700">Competition Results</h2>
+              <p className="mt-1 text-sm text-gray-600">View saved scores and prize places, with results filtered by instructor.</p>
+            </Link>
+          </div>
+          </>
         )}
       </div>
     </div>

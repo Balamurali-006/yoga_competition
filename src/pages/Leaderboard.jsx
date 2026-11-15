@@ -8,8 +8,8 @@ const Leaderboard = () => {
   useEffect(() => {
     const loadLeaderboard = async () => {
       try {
-        const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
-        const response = await fetch(`${apiBaseUrl}/leaderboard`);
+        const apiBaseUrl = process.env.REACT_APP_UPI_API_BASE_URL || "http://localhost:5001";
+        const response = await fetch(`${apiBaseUrl}/api/leaderboard`);
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Leaderboard load failed.");
 

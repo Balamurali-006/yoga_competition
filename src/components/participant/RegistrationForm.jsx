@@ -1,7 +1,6 @@
 import React, { useState } from "react";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { db } from "../../firebase/firebaseConfig";
 import { useNavigate } from "react-router-dom";
+import { saveRegistrationAccess, upiApiRequest } from "../../firebase/upiApi";
 
 const TEST_FORM_DATA = {
   name: "Aarav Kumar",
@@ -39,6 +38,7 @@ const RegistrationForm = () => {
 
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionError, setSubmissionError] = useState("");
   const navigate = useNavigate();
 
   const fillTestData = () => {
@@ -99,10 +99,12 @@ const RegistrationForm = () => {
     }
 
     setIsSubmitting(true);
+    setSubmissionError("");
 
     try {
-      // Prepare participant data
-      const participantData = {
+      const registration = await upiApiRequest("/api/registrations", {
+        method: "POST",
+        body: JSON.stringify({
         name: form.name,
         dob: form.dob,
         age: Number(form.age),
@@ -113,19 +115,13 @@ const RegistrationForm = () => {
         event: form.event,
         category: form.category,
         level: form.level,
-        paymentStatus: "pending",
-        serialNumber: null,
-        createdAt: serverTimestamp(),
-      };
-
-      // Save to Firestore collection "participants"
-      const docRef = await addDoc(collection(db, "participants"), participantData);
-
-      // Redirect user to payment page
-      navigate(`/pay/${docRef.id}`);
+        }),
+      });
+      saveRegistrationAccess(registration.paymentGroupId, registration.accessToken);
+      navigate(`/upi-payment/${registration.paymentGroupId}`);
     } catch (error) {
-      console.error("Firestore Error:", error);
-      alert("❌ Failed to save participant details.");
+      console.error("Registration submission failed:", error);
+      setSubmissionError(error.message || "Could not save participant details.");
       setIsSubmitting(false);
     }
   };
@@ -155,6 +151,11 @@ const RegistrationForm = () => {
         </div>
 
         <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8 space-y-6">
+          {submissionError && (
+            <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+              {submissionError}
+            </p>
+          )}
           {process.env.NODE_ENV === "development" && (
             <div className="flex flex-wrap gap-3 justify-end">
               <button

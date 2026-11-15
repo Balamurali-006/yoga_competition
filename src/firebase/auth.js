@@ -26,6 +26,7 @@ export const setCustomAuthUser = (user) => {
 };
 
 export const login = async (email, password) => {
+  setCustomAuthUser(null);
   return await signInWithEmailAndPassword(auth, email, password);
 };
 
@@ -41,30 +42,21 @@ export const logout = async () => {
 // Subscribe to auth state changes
 export const subscribeToAuth = (callback) => {
   const customUser = getCustomAuthUser();
-  if (customUser) {
+  if (customUser && !auth.currentUser) {
     callback(customUser);
   }
 
   const handleCustomAuth = () => {
     const user = getCustomAuthUser();
-    if (user) {
-      callback(user);
-    } else if (!auth.currentUser) {
-      callback(null);
-    }
+    if (auth.currentUser) return;
+    callback(user || null);
   };
 
   window.addEventListener("custom-auth-changed", handleCustomAuth);
 
   const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-    const activeCustom = getCustomAuthUser();
-    if (activeCustom) {
-      callback(activeCustom);
-      return;
-    }
-
     if (!firebaseUser) {
-      callback(null);
+      callback(getCustomAuthUser());
       return;
     }
 

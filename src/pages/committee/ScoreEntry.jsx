@@ -18,14 +18,17 @@ const ScoreEntry = () => {
     try {
       const participantQuery = query(
         collection(db, "participants"),
-        where("serialNumber", "==", serialNumber.trim()),
-        where("paymentStatus", "==", "success")
+        where("serialNumber", "==", serialNumber.trim())
       );
       const snapshot = await getDocs(participantQuery);
       if (snapshot.empty) {
         setMessage("No participant found with that serial number.");
       } else {
         const match = snapshot.docs[0];
+        if (!["success", "VERIFIED"].includes(match.data().paymentStatus)) {
+          setMessage("This participant's payment has not been verified.");
+          return;
+        }
         setParticipant({ id: match.id, ...match.data() });
         const existingScores = match.data().scores || [];
         setScores(Array.from({ length: 5 }, (_, index) => existingScores[index] ?? ""));

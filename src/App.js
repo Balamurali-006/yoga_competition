@@ -11,7 +11,9 @@ import Footer from "./components/common/Footer";
 import Home from "./pages/Home";
 import IndividualRegistration from "./pages/IndividualRegistration";
 import SchoolRegistration from "./pages/SchoolRegistration";
-import PaymentPage from "./pages/PaymentPage";
+import UpiPaymentPage from "./pages/UpiPaymentPage";
+import AdminUpiPayments from "./pages/admin/AdminUpiPayments";
+import AdminCheckIn from "./pages/admin/AdminCheckIn";
 import RegistrationStatus from "./pages/RegistrationStatus";
 import Validation from "./pages/Validation";
 
@@ -23,6 +25,7 @@ import ScoreEntry from "./pages/committee/ScoreEntry";
 
 /* ADMIN PAGES */
 import AdminDashboard from "./pages/admin/AdminDashboard";
+import AdminResults from "./pages/admin/AdminResults";
 import ManageEvents from "./pages/admin/ManageEvents";
 import ManageCategories from "./pages/admin/ManageCategories";
 import ManageAgeGroups from "./pages/admin/ManageAgeGroups";
@@ -30,7 +33,6 @@ import ManageTemplates from "./pages/admin/ManageTemplates";
 import ManageParticipants from "./pages/admin/ManageParticipants";
 import ManageUsers from "./pages/admin/ManageUsers";
 import AdminLeaderboard from "./pages/admin/AdminLeaderboard";
-import PaymentSuccess from "./pages/PaymentSuccess";
 
 
 function App() {
@@ -47,7 +49,7 @@ function App() {
   }, []);
 
   return (
-    <Router>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Navbar />
 
       <Routes>
@@ -55,8 +57,9 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/register" element={<IndividualRegistration />} />
         <Route path="/school-registration" element={<SchoolRegistration />} />
-        <Route path="/payment" element={<PaymentPage />} />
         <Route path="/status" element={<RegistrationStatus />} />
+        <Route path="/upi-payment/:paymentId" element={<UpiPaymentPage />} />
+        <Route path="/pay/:pid" element={<UpiPaymentPage />} />
 
         {/* VALIDATION MODULE */}
         <Route path="/validation" element={<Validation user={authUser} />} />
@@ -77,9 +80,9 @@ function App() {
         <Route path="/admin/participants" element={<AdminRoute user={authUser} loading={authLoading}><ManageParticipants /></AdminRoute>} />
         <Route path="/admin/users" element={<AdminRoute user={authUser} loading={authLoading}><ManageUsers /></AdminRoute>} />
         <Route path="/admin/leaderboard" element={<AdminRoute user={authUser} loading={authLoading}><AdminLeaderboard /></AdminRoute>} />
-
-        <Route path="/pay/:pid" element={<PaymentPage />} />
-        <Route path="/payment-success/:pid" element={<PaymentSuccess />} />
+        <Route path="/admin/results" element={<AdminRoute user={authUser} loading={authLoading}><AdminResults /></AdminRoute>} />
+        <Route path="/admin/upi-payments" element={<AdminRoute user={authUser} loading={authLoading}><AdminUpiPayments /></AdminRoute>} />
+        <Route path="/admin/check-in" element={<AdminRoute user={authUser} loading={authLoading}><AdminCheckIn /></AdminRoute>} />
 
       </Routes>
 
