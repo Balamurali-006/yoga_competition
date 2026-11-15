@@ -25,4 +25,5 @@ yarn-error.log*
 
 .env
 serviceAccountKey.json
+/upi-backend/node_modules/
 

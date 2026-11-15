@@ -19,15 +19,18 @@ service cloud.firestore {
       return userRole() in ['admin', 'committee'];
     }
 
-    match /participants/{participantId} {
-      allow create: if request.resource.data.paymentStatus == 'pending'
-        && request.resource.data.keys().hasOnly([
-          'name', 'dob', 'age', 'institution', 'instructor', 'instructorPhone',
-          'email', 'event', 'category', 'level', 'paymentStatus', 'serialNumber', 'createdAt',
-          'gender', 'class'
+    function adminCanUpdateParticipant() {
+      return isAdmin()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'paymentStatus', 'registrationStatus', 'serialNumber', 'paymentGroupId',
+          'checkedInAt', 'checkedInBy'
         ]);
+    }
+
+    match /participants/{participantId} {
+      allow create: if false;
       allow get, list: if isStaff();
-      allow update: if isAdmin() || (userRole() == 'committee'
+      allow update: if adminCanUpdateParticipant() || (userRole() == 'committee'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'scores', 'score', 'scoredAt', 'verificationStatus', 'verifiedAt'
         ]));

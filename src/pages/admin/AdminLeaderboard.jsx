@@ -13,7 +13,7 @@ const AdminLeaderboard = () => {
         const snapshot = await getDocs(collection(db, "participants"));
         const participants = snapshot.docs
           .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-          .filter((item) => ["paid", "success"].includes(item.paymentStatus) && Number.isFinite(Number(item.score)))
+          .filter((item) => ["paid", "success", "VERIFIED"].includes(item.paymentStatus) && Number.isFinite(Number(item.score)))
           .map((item) => ({
             id: item.id,
             name: item.name || "Unknown Participant",

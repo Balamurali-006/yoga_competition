@@ -1,10 +1,10 @@
 # Ekadhma — International Yoga Competition Portal
 
-A full-stack web application for managing an international Yoga competition. Covers public registration (individual & school/group), Razorpay payment processing, committee-based participant verification and scoring, a live leaderboard, and a complete admin back-office — all backed by Firebase.
+A full-stack web application for managing an international Yoga competition. Covers public registration (individual & school/group), direct UPI payment instructions with UTR submission and manual admin verification, committee-based participant verification and scoring, a live leaderboard, and a complete admin back-office — all backed by Firebase.
 
 ## Current Project Status
 
-The app is in a functional, feature-complete state for the competition workflow described below. The frontend build succeeds and the React test suite passes. The backend has also been hardened so it can be imported safely in local/test environments without crashing when Firebase or Razorpay configuration is absent; payment and admin routes respond with explicit 503/401/403 responses instead of failing during app startup.
+The application has a separate UPI API in `upi-backend/`; the existing `server/` Razorpay backend is preserved and is no longer used by the updated registration/payment UI. UPI payments are not automatically verified: admins must match each submitted UTR and exact amount against trusted bank records before the backend confirms a registration and assigns serial numbers. Configure Firebase, UPI and (if screenshots are enabled) Firebase Storage credentials before running the new flow.
 
 ---
 
@@ -17,8 +17,8 @@ The app is in a functional, feature-complete state for the competition workflow 
 | Backend | Node.js + Express 5 |
 | Database | Cloud Firestore |
 | Authentication | Firebase Auth (email/password) with role-based access via Firestore |
-| Payments | Razorpay (client checkout + server-side HMAC signature verification) |
-| File Storage | Firebase Storage (helpers ready, not yet used) |
+| Payments | Direct UPI instructions, transaction-reference submission, manual bank-record verification |
+| File Storage | Firebase Storage Admin SDK for optional private payment screenshots |
 | Notifications | react-toastify |
 | Icons | react-icons |
 | Firebase Project | `lenin-2e9d2` |
@@ -30,12 +30,13 @@ The app is in a functional, feature-complete state for the competition workflow 
 ### Public Area (fully functional)
 
 - **Home page** — Modern landing page with parallax hero image, animated background blobs, intersection-observer scroll animations, "2025 Edition" badge, stats counters (5000+ Participants, 150+ Events, 3 Levels), "Why Participate?" feature cards, and CTA buttons. All Tailwind CSS.
-- **Individual Registration** (`/register`) — Renders the `RegistrationForm` component. 10-field form: Full Name, Email, Date of Birth, Age (auto-calculated), Institution Name, Instructor Name, Instructor Phone (10-digit validation), Event Type, Level (district/state/south-india/national), Category (forward/backward/twist/balance/standing). Saves to Firestore `participants` collection with `paymentStatus: "pending"`, then navigates to payment.
-- **School / Group Registration** (`/school-registration`) — Collects school-level info (Institution, Instructor, Phone, Email) plus a dynamic table of student rows (Name, Age, Gender, Class). Uses Firestore `writeBatch` for atomic multi-participant creation. Shows per-participant `PaymentButton` after save. Responsive desktop table + mobile card views.
-- **Payment Page** (`/pay/:pid`) — Gets participant ID from URL params and fee from `REACT_APP_REGISTRATION_FEE` env var (defaults to ₹2). Renders `PaymentButton` which creates a Razorpay order via the backend, opens the Razorpay checkout modal, verifies payment server-side (HMAC-SHA256 with `timingSafeEqual`), generates a serial number (`YYYY-LevelCode-ID`), and updates Firestore atomically via transaction.
-- **Payment Success** (`/payment-success/:pid`) — Calls backend `GET /payment-receipt/:pid` to verify and display receipt with participant name and serial number.
-- **Registration Status** (`/status`) — Lookup by mobile number (10-digit validation). Calls backend `GET /registration-status?phone=...` and displays matches with name, serial number, and payment status.
-- **Leaderboard** (`/leaderboard`) — Fetches from backend `GET /leaderboard` (top 100 paid participants by score). Top-3 podium display (gold/silver/bronze with SVG stars), desktop table view, mobile card view. Stats footer with total participants, top score, and average score. Polished UI.
+- **Individual Registration** (`/register`) — Renders the `RegistrationForm` component. Collects participant details and submits them to the UPI backend, which creates a pending Firestore registration and a session-scoped access token.
+- **School / Group Registration** (`/school-registration`) — Collects school-level info plus a dynamic table of students. The UPI backend creates participants and one group payment with the server-configured per-participant fee.
+- **UPI Payment and Participant Status** (`/upi-payment/:paymentId`) — Shows the organization UPI ID, configured fee, payment-specific UPI QR/deep link, and UTR submission form. Participants can check their payment status and, after admin verification, view serial numbers and signed check-in QR tickets.
+- **Manual Admin Payment Review** (`/admin/upi-payments`) — Admin-only payment search, status filters, UTR/amount review, optional screenshot access, bank-record confirmation, approve/reject actions, internal notes, and audit history.
+- **Competition Check-in** (`/admin/check-in`) — Admin QR scanner and manual serial-number fallback; backend accepts only verified registrations and prevents repeat check-ins.
+- **Registration Status** (`/status`) — Legacy lookup by mobile number (10-digit validation). Calls the original backend `GET /registration-status?phone=...`.
+- **Leaderboard** (`/leaderboard`) — Fetches verified participants from the UPI backend (top 100 scored entries). Top-3 podium display, desktop table view, mobile card view, and stats footer.
 
 ### Committee Area (fully functional, role-protected)
 
@@ -43,7 +44,7 @@ Routes are guarded by `ProtectedRoute` — allows `"committee"` or `"admin"` rol
 
 - **Committee Login** (`/committee/login`) — Firebase Auth login with role check. Committee users → `/committee/verify`, admin users → `/admin/dashboard`.
 - **Participant Verification** (`/committee/verify`) — Free-text search across all participants (name, email, phone, serial, institution). Shows full participant details. "Mark Verified" button updates Firestore with `verificationStatus: "verified"` and `verifiedAt` timestamp.
-- **Score Entry** (`/committee/score`) — Two-step flow: (1) find participant by serial number (must have `paymentStatus: "success"`), (2) enter 5 scores (0–10, step 0.5). Calculates total and updates the `participants` doc directly in Firestore.
+- **Score Entry** (`/committee/score`) — Find a participant by serial number (payment must be `success` for legacy records or `VERIFIED` for UPI registrations), then enter five scores from 0–10. Calculates total and updates the `participants` doc directly in Firestore.
 
 ### Admin Area (fully functional, role-protected)
 
@@ -67,10 +68,10 @@ All admin routes are guarded by `AdminRoute` — checks Firebase Auth + `role ==
 | `Footer` | ✅ Functional | Static copyright footer |
 | `AdminRoute` | ✅ Functional | Auth guard — checks Firebase Auth + admin role from `subscribeToAuth` |
 | `ProtectedRoute` | ✅ Functional | Auth guard — allows committee + admin roles |
-| `LoadingSpinner` | ⚠️ Partial | Renders spinner div but `@keyframes spin` is commented out — won't animate unless added to CSS |
-| `RegistrationForm` | ✅ Functional | Full 10-field form with validation, auto-age-calc, Firestore save, dev-mode test data helpers |
-| `PaymentButton` | ✅ Functional | Razorpay checkout flow: create order → open modal → verify → navigate to success |
-| `SchoolRegistrationTable` | ✅ Functional | School info + dynamic student rows, batch Firestore writes, responsive table/card views |
+| `LoadingSpinner` | ✅ Functional | Reusable loading spinner |
+| `RegistrationForm` | ✅ Functional | Validated participant form, auto-age-calc, UPI API registration submission |
+| `PaymentButton` | Legacy / unused | Razorpay checkout component retained for the original payment flow |
+| `SchoolRegistrationTable` | ✅ Functional | School info + dynamic student rows submitted to the isolated UPI API |
 
 ### Dead / Unused Code
 
@@ -78,7 +79,7 @@ These files exist in the codebase but are **not imported or used** by any active
 
 | File | Issue |
 |------|-------|
-| `src/firebase/razorpay.js` | Placeholder with `YOUR_PROJECT_ID` URL, imports `axios` (not in dependencies). Payment flow uses `server/server.js` instead. |
+| `src/firebase/razorpay.js` | Legacy placeholder with `YOUR_PROJECT_ID` URL and an `axios` import. The active registration flow uses `upi-backend/`. |
 | `src/firebase/storage.js` | Functional upload/download helpers, but no component uses file uploads yet. |
 | `src/components/admin/EventForm.jsx` | Old skeleton — `handleSubmit` just calls `alert("Firebase Coming Soon")`. Actual event CRUD is in `ManageEvents.jsx`. |
 | `src/components/committee/SerialVerification.jsx` | Skeleton with hardcoded mock data, references non-existent `ParticipantDetailsCard`. Actual verification is in `Verify.jsx`. |
@@ -98,7 +99,7 @@ These files exist in the codebase but are **not imported or used** by any active
 
 ### Backend — Express Server (`server/server.js`)
 
-Production-quality Express 5 server on port 5000:
+Legacy Express 5 server on port 5000. It remains in the repository and is unchanged by the UPI implementation; its Razorpay endpoints are not used by the new registration UI:
 
 | Endpoint | Auth | Description |
 |----------|------|-------------|
@@ -111,13 +112,17 @@ Production-quality Express 5 server on port 5000:
 
 **Middleware:** `requireFirebaseUser` (verifies Firebase ID tokens), `requireRole(role)` (checks Firestore user doc with role hierarchy support).
 
+### Alternative UPI Backend (`upi-backend/`)
+
+A separate Express 5 API on port 5001 supports individual and group registration, payment UTR submission, manual admin verification, transactional serial generation, signed QR check-in, and optional private screenshot storage. It uses the same Firestore project and Firebase Auth admin accounts as the existing application. See [upi-backend/README.md](./upi-backend/README.md) for environment variables, API routes, and setup.
+
 ### Firestore Security Rules
 
 Well-structured rules with helper functions (`signedIn()`, `userRole()`, `isAdmin()`, `isStaff()`):
 
 | Collection | Read | Write |
 |------------|------|-------|
-| `participants` | Staff only | Anyone can CREATE (with restrictions); admin full update; committee can update scoring/verification fields only; admin can delete |
+| `participants` | Staff only | Server/Admin SDK only; admin and committee client updates cannot change UPI payment status, serial numbers, or check-in data; admin can delete |
 | `users` | Own doc or admin | Server-side only (Admin SDK) |
 | `events`, `categories`, `ageGroups`, `scoringTemplates` | Admin only | Admin only |
 
@@ -127,7 +132,12 @@ Well-structured rules with helper functions (`signedIn()`, `userRole()`, `isAdmi
 
 | Collection | Purpose |
 |------------|---------|
-| `participants` | All participant registrations (individual + school) |
+| `participants` | Registrations; UPI status, serials, and check-in values are server-managed |
+| `upiPayments` | Payment details and verification state per individual/group payment |
+| `upiUtrClaims` | Hash-keyed UTR claims for duplicate prevention |
+| `paymentAuditLogs` | Payment submission, status, and admin-note audit history |
+| `serialCounters` | Transactional per-year serial-number counters |
+| `checkInAuditLogs` | Successful admin check-in events |
 | `users` | User accounts with roles (`admin` / `committee`) |
 | `events` | Competition events with level, location, date |
 | `categories` | Yoga categories with name and code |
@@ -145,6 +155,12 @@ clean-yoga/
 │   ├── server.js                   # Express + Razorpay + Firebase Admin backend
 │   ├── package.json                # Server dependencies (express 5, firebase-admin 13.6, razorpay 2.9.6)
 │   └── .env                        # Server environment variables
+├── upi-backend/
+│   ├── app.js                      # Isolated UPI and admin API routes
+│   ├── server.js                   # Firebase Admin initialization and port 5001 listener
+│   ├── domain.js                   # UTR, amount, and QR-token helpers
+│   ├── .env.example                # UPI backend configuration template
+│   └── README.md                   # UPI API, setup, and security notes
 ├── src/
 │   ├── components/
 │   │   ├── admin/                  # Admin form/table components (mostly legacy skeletons)
@@ -156,17 +172,20 @@ clean-yoga/
 │   │   │   ├── Navbar.jsx          # Responsive nav with mobile menu
 │   │   │   └── ProtectedRoute.jsx  # Committee auth guard
 │   │   └── participant/
-│   │       ├── PaymentButton.jsx   # Razorpay checkout component
+│   │       ├── PaymentButton.jsx   # Legacy Razorpay checkout component
 │   │       ├── RegistrationForm.jsx    # Main registration form
 │   │       └── SchoolRegistrationTable.jsx  # School bulk registration
 │   ├── firebase/
 │   │   ├── auth.js                 # Login, logout, auth state subscription
 │   │   ├── firebaseConfig.js       # Firebase init (env-based config)
+│   │   ├── upiApi.js               # UPI backend requests and participant access token
 │   │   ├── firestore.js            # Generic Firestore CRUD helpers
 │   │   ├── razorpay.js             # ⚠️ Unused placeholder
 │   │   └── storage.js              # ⚠️ Functional but unused
 │   ├── pages/
 │   │   ├── admin/
+│   │   │   ├── AdminUpiPayments.jsx # Payment review and audit history
+│   │   │   ├── AdminCheckIn.jsx     # QR and serial-number check-in
 │   │   │   ├── AdminDashboard.jsx  # Stats + navigation
 │   │   │   ├── AdminLeaderboard.jsx
 │   │   │   ├── AdminLogin.jsx
@@ -183,15 +202,14 @@ clean-yoga/
 │   │   ├── Home.jsx                # Animated landing page (Tailwind)
 │   │   ├── IndividualRegistration.jsx
 │   │   ├── Leaderboard.jsx         # Podium + table + stats
-│   │   ├── PaymentPage.jsx
-│   │   ├── PaymentSuccess.jsx
+│   │   ├── UpiPaymentPage.jsx      # UPI payment, participant status, and QR ticket
 │   │   ├── RegistrationStatus.jsx
 │   │   └── SchoolRegistration.jsx
 │   ├── styles/
 │   │   ├── form.css                # Legacy wrapper styles
 │   │   └── schoolRegistration.css  # Legacy wrapper styles
 │   └── App.js                      # Routing + global auth state
-├── .env                            # Frontend env vars (Firebase config, fee)
+├── .env                            # Frontend env vars (Firebase config, UPI API URL)
 ├── .firebaserc                     # Firebase project: lenin-2e9d2
 ├── firebase.json                   # Firestore rules + Functions config
 ├── firestore.rules                 # Role-based security rules
@@ -207,8 +225,9 @@ clean-yoga/
 
 - Node.js (v18+)
 - npm
-- A Firebase project with Firestore, Auth, and Storage enabled
-- Razorpay API keys
+- A Firebase project with Firestore and Authentication enabled
+- Organization UPI ID and registration fee
+- Firebase Storage bucket only if screenshot upload is enabled
 
 ### 1. Install frontend dependencies
 
@@ -216,7 +235,7 @@ clean-yoga/
 npm install
 ```
 
-### 2. Install backend dependencies
+### 2. Install legacy backend dependencies (optional)
 
 ```bash
 cd server
@@ -234,10 +253,10 @@ REACT_APP_FIREBASE_PROJECT_ID=your_project_id
 REACT_APP_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
 REACT_APP_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
 REACT_APP_FIREBASE_APP_ID=your_app_id
-REACT_APP_REGISTRATION_FEE=500
+REACT_APP_UPI_API_BASE_URL=http://localhost:5001
 ```
 
-### 4. Configure backend environment
+### 4. Configure legacy backend environment
 
 Create a `.env` file inside the `server/` folder:
 
@@ -249,7 +268,19 @@ FIREBASE_SERVICE_ACCOUNT={"type":"service_account",...}
 
 Or place a `serviceAccountKey.json` file in the `server/` folder. The server is intentionally safe to import in local/test environments without these values, but live payment and admin routes require valid Firebase and Razorpay configuration.
 
-### 5. Start the backend
+### 5. Configure and run the UPI backend
+
+The new registration flow uses the isolated backend. Configure `upi-backend/.env` from `upi-backend/.env.example`, including the Firebase service account, organization UPI ID, and real registration fee. Set `REACT_APP_UPI_API_BASE_URL=http://localhost:5001` in the project-root `.env`.
+
+```powershell
+Set-Location .\upi-backend
+npm install
+npm start
+```
+
+For screenshot uploads, also configure `FIREBASE_STORAGE_BUCKET`. Screenshots are optional and are treated as reference only. The backend cannot verify UTRs automatically; an admin must confirm them against actual bank transaction history.
+
+### 6. Start the legacy backend (optional)
 
 ```bash
 cd server
@@ -258,7 +289,9 @@ npm start
 
 Backend runs at `http://localhost:5000`.
 
-### 6. Start the frontend
+The original Razorpay backend can still be run separately if needed, but the updated registration flow does not call it.
+
+### 7. Start the frontend
 
 ```bash
 npm start
@@ -268,19 +301,22 @@ Frontend runs at `http://localhost:3000`.
 
 ---
 
-## What's Still Remaining
+## Known Limitations and Follow-up
 
 | Item | Details |
 |------|---------|
-| `LoadingSpinner` animation | `@keyframes spin` is commented out — spinner doesn't animate |
 | Edit/Delete users from admin UI | `ManageUsers` can create users but not edit or delete existing ones |
 | Edit scoring templates | `ManageTemplates` supports create and delete but no edit |
 | Edit/delete participants from admin | `ManageParticipants` is read-only |
-| Firebase Storage integration | Helper functions exist (`storage.js`) but no component uses file uploads |
+| Legacy browser storage helper | `src/firebase/storage.js` is not used; UPI screenshots use the backend Firebase Admin SDK |
 | Dead code cleanup | Several legacy skeleton components and unused files should be removed |
 | Verify.jsx scalability | Currently fetches entire `participants` collection for client-side search — needs server-side search at scale |
 | School registration defaults | All school participants are hardcoded to `event: "district"`, `category: "group"` — no selection available |
 | `razorpay.js` client helper | Placeholder file with wrong URL and missing `axios` dependency — should be removed (backend handles payments) |
+| Bank verification integration | No bank/UPI provider API or statement import is configured; payments must be manually matched by an administrator |
+| Distributed rate limiting | The new API's in-memory rate limiter is process-local; use shared storage before scaling to multiple instances |
+
+Firestore collections are created lazily by the UPI backend; no relational migration is required. Deploy the updated Firestore rules/index and private screenshot Storage rules with `firebase deploy --only firestore:rules,firestore:indexes,storage`.
 
 ---
 
