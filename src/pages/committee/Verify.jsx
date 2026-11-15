@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { doc, updateDoc } from "firebase/firestore";
+import { doc, updateDoc, writeBatch } from "firebase/firestore";
 import { getIdToken } from "firebase/auth";
 import { db, auth } from "../../firebase/firebaseConfig";
 import { subscribeToCollection } from "../../firebase/firestore";
@@ -15,6 +15,12 @@ const Verify = () => {
   const [participantsList, setParticipantsList] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
   const [selectedInstructor, setSelectedInstructor] = useState("");
+
+  // Visited state for students under current filter: { [studentId]: boolean }
+  const [visitedMap, setVisitedMap] = useState({});
+  const [hasVisitedChanges, setHasVisitedChanges] = useState(false);
+  const [savingVisited, setSavingVisited] = useState(false);
+  const [visitedMessage, setVisitedMessage] = useState("");
 
   // Single participant search/verify state
   const [search, setSearch] = useState("");
@@ -58,6 +64,120 @@ const Verify = () => {
       (p) => (p.instructor || "").trim().toLowerCase() === selectedInstructor.trim().toLowerCase()
     );
   }, [participantsList, selectedInstructor]);
+
+  // When selected instructor changes, initialize visitedMap from database values
+  useEffect(() => {
+    if (!selectedInstructor) {
+      setVisitedMap({});
+      setHasVisitedChanges(false);
+      setVisitedMessage("");
+      return;
+    }
+    const initial = {};
+    instructorStudents.forEach((student) => {
+      initial[student.id] = student.visited === true;
+    });
+    setVisitedMap(initial);
+    setHasVisitedChanges(false);
+    setVisitedMessage("");
+  }, [selectedInstructor, participantsList]);
+
+  // Count how many students under the current filter are marked visited
+  const visitedCount = useMemo(() => {
+    return instructorStudents.filter((s) => visitedMap[s.id]).length;
+  }, [instructorStudents, visitedMap]);
+
+  // Check if all students under current filter are marked visited
+  const isAllSelected = useMemo(() => {
+    if (instructorStudents.length === 0) return false;
+    return instructorStudents.every((s) => visitedMap[s.id]);
+  }, [instructorStudents, visitedMap]);
+
+  // Toggle single student visited checkbox
+  const toggleStudentVisited = (studentId) => {
+    setVisitedMap((prev) => ({
+      ...prev,
+      [studentId]: !prev[studentId],
+    }));
+    setHasVisitedChanges(true);
+    setVisitedMessage("");
+  };
+
+  // Select all or deselect all students under current instructor filter
+  const toggleSelectAll = () => {
+    const targetState = !isAllSelected;
+    const nextMap = { ...visitedMap };
+    instructorStudents.forEach((s) => {
+      nextMap[s.id] = targetState;
+    });
+    setVisitedMap(nextMap);
+    setHasVisitedChanges(true);
+    setVisitedMessage("");
+  };
+
+  // Save visited changes to Firestore (both 'participants' and 'visitors' collections)
+  const saveVisitedChanges = async () => {
+    if (instructorStudents.length === 0) return;
+    setSavingVisited(true);
+    setVisitedMessage("");
+
+    try {
+      const batch = writeBatch(db);
+      const timestamp = new Date().toISOString();
+
+      instructorStudents.forEach((student) => {
+        const isVisited = !!visitedMap[student.id];
+        const participantRef = doc(db, "participants", student.id);
+        const visitorRef = doc(db, "visitors", student.id);
+
+        if (isVisited) {
+          // 1. Update participants collection
+          batch.update(participantRef, {
+            visited: true,
+            visitedAt: timestamp,
+          });
+
+          // 2. Add / update document in visitors collection
+          batch.set(visitorRef, {
+            participantId: student.id,
+            name: student.name || "",
+            serialNumber: student.serialNumber || null,
+            age: student.age || null,
+            gender: student.gender || null,
+            class: student.class || null,
+            institution: student.institution || null,
+            instructor: student.instructor || null,
+            instructorPhone: student.instructorPhone || null,
+            email: student.email || null,
+            event: student.event || null,
+            category: student.category || null,
+            level: student.level || null,
+            paymentStatus: student.paymentStatus || null,
+            visited: true,
+            visitedAt: timestamp,
+            updatedAt: timestamp,
+            markedBy: "committee",
+          });
+        } else {
+          // If unchecked, mark not visited in participants and remove from visitors collection
+          batch.update(participantRef, {
+            visited: false,
+            visitedAt: null,
+          });
+          batch.delete(visitorRef);
+        }
+      });
+
+      await batch.commit();
+      setHasVisitedChanges(false);
+      setVisitedMessage("✓ Visited status saved successfully! Visitors collection updated.");
+    } catch (err) {
+      console.error("Failed to save visited status:", err);
+      setVisitedMessage("❌ Failed to save visited status. Please check your connection and try again.");
+    } finally {
+      setSavingVisited(false);
+    }
+  };
 
   // Handle single participant search
   const searchParticipant = async () => {
@@ -159,14 +279,14 @@ const Verify = () => {
       {/* Print-specific stylesheet */}
       <style>{`
         @media print {
-          /* Hide all navbar, footer, buttons, and search inputs */
+          /* Hide all navbar, footer, buttons, controls, and search inputs */
           nav, footer, .no-print, header, .no-print * {
             display: none !important;
           }
           body, html {
             background: #fff !important;
             color: #000 !important;
-            font-size: 12pt;
+            font-size: 11pt;
           }
           .printable-report {
             display: block !important;
@@ -192,6 +312,12 @@ const Verify = () => {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
+          .print-only {
+            display: inline-block !important;
+          }
+        }
+        .print-only {
+          display: none;
         }
       `}</style>
 
@@ -206,7 +332,7 @@ const Verify = () => {
               </h1>
             </div>
             <p className="text-gray-600 mt-1 text-sm md:text-base">
-              Filter by instructor, print student batches as PDF, and verify participants.
+              Mark student attendance as visited, save changes to database & visitors collection, and print reports.
             </p>
           </div>
           <button
@@ -217,20 +343,20 @@ const Verify = () => {
           </button>
         </div>
 
-        {/* SECTION 1: FILTER BY INSTRUCTOR & STUDENT DETAILS + PRINT */}
+        {/* SECTION 1: FILTER BY INSTRUCTOR & VISITED ATTENDANCE + PRINT */}
         <div className="bg-white rounded-3xl shadow-xl p-6 md:p-8 border border-purple-100 printable-report">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 no-print">
             <div>
               <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
                 <span>📋</span>
-                <span>Student Details by Instructor</span>
+                <span>Student Details & Event Attendance</span>
               </h2>
               <p className="text-sm text-gray-500 mt-1">
-                Select an instructor to view their registered students and print as PDF.
+                Filter by instructor, mark visited students, and save changes to update both participants and visitors collections.
               </p>
             </div>
 
-            {/* Print as PDF Button */}
+            {/* Print Button */}
             {selectedInstructor && instructorStudents.length > 0 && (
               <button
                 type="button"
@@ -272,10 +398,10 @@ const Verify = () => {
             )}
           </div>
 
-          {/* Print Header (Only visible on print or report display) */}
+          {/* Report Header Bar */}
           {selectedInstructor && (
             <div className="mb-6 p-4 rounded-2xl bg-purple-50 border border-purple-200">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                 <div>
                   <h3 className="text-lg font-bold text-purple-900">
                     Instructor: <span className="text-purple-700">{selectedInstructor}</span>
@@ -289,72 +415,196 @@ const Verify = () => {
                     )}
                   </p>
                 </div>
-                <div className="bg-white px-3 py-1.5 rounded-xl border border-purple-200 text-sm font-bold text-purple-700">
-                  Total Students: {instructorStudents.length}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="bg-white px-3 py-1.5 rounded-xl border border-purple-200 text-sm font-bold text-purple-700 shadow-sm">
+                    Total: {instructorStudents.length}
+                  </div>
+                  <div className="bg-green-100 px-3 py-1.5 rounded-xl border border-green-300 text-sm font-bold text-green-800 shadow-sm">
+                    Visited: {visitedCount} / {instructorStudents.length}
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Student Details Display */}
+          {/* Student Details & Visited Attendance Table */}
           {selectedInstructor ? (
             instructorStudents.length === 0 ? (
               <p className="text-gray-500 text-center py-8">
                 No students found under instructor "{selectedInstructor}".
               </p>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-gray-200" ref={printRef}>
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-gradient-to-r from-purple-600 to-orange-500 text-white">
-                    <tr>
-                      <th className="px-4 py-3 font-semibold">#</th>
-                      <th className="px-4 py-3 font-semibold">Serial No</th>
-                      <th className="px-4 py-3 font-semibold">Student Name</th>
-                      <th className="px-4 py-3 font-semibold">Age</th>
-                      <th className="px-4 py-3 font-semibold">Gender</th>
-                      <th className="px-4 py-3 font-semibold">Class</th>
-                      <th className="px-4 py-3 font-semibold">Event</th>
-                      <th className="px-4 py-3 font-semibold">Category</th>
-                      <th className="px-4 py-3 font-semibold">Level</th>
-                      <th className="px-4 py-3 font-semibold">Payment</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {instructorStudents.map((student, idx) => (
-                      <tr key={student.id || idx} className="hover:bg-purple-50 transition-colors">
-                        <td className="px-4 py-3 text-gray-500 font-medium">{idx + 1}</td>
-                        <td className="px-4 py-3 font-bold text-purple-700">
-                          {student.serialNumber || "—"}
-                        </td>
-                        <td className="px-4 py-3 font-semibold text-gray-900">{student.name}</td>
-                        <td className="px-4 py-3 text-gray-700">{student.age || "—"}</td>
-                        <td className="px-4 py-3 text-gray-700">{student.gender || "—"}</td>
-                        <td className="px-4 py-3 text-gray-700">{student.class || "—"}</td>
-                        <td className="px-4 py-3 capitalize text-gray-700">{student.event || "—"}</td>
-                        <td className="px-4 py-3 capitalize text-gray-700">{student.category || "—"}</td>
-                        <td className="px-4 py-3 capitalize text-gray-700">{student.level || "—"}</td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                              student.paymentStatus === "success"
-                                ? "bg-green-100 text-green-700"
-                                : "bg-yellow-100 text-yellow-700"
+              <div className="space-y-4">
+                {/* Controls Bar: Select All + Save Changes (Top) */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-gray-50 rounded-2xl border border-gray-200 no-print">
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer select-none font-semibold text-sm text-gray-800">
+                      <input
+                        type="checkbox"
+                        checked={isAllSelected}
+                        onChange={toggleSelectAll}
+                        className="w-5 h-5 text-purple-600 rounded border-gray-300 focus:ring-purple-500 cursor-pointer accent-purple-600"
+                      />
+                      <span>Select All as Visited</span>
+                    </label>
+                    <span className="text-xs text-gray-500">
+                      ({visitedCount} of {instructorStudents.length} marked)
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={saveVisitedChanges}
+                    disabled={savingVisited}
+                    className="flex items-center justify-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-50 text-sm"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    {savingVisited ? "Saving..." : "Save Changes"}
+                  </button>
+                </div>
+
+                {/* Status / Feedback Alert */}
+                {visitedMessage && (
+                  <div
+                    className={`p-4 rounded-xl text-sm font-semibold no-print flex items-center justify-between ${
+                      visitedMessage.startsWith("✓")
+                        ? "bg-green-100 text-green-800 border border-green-300"
+                        : "bg-red-100 text-red-800 border border-red-300"
+                    }`}
+                  >
+                    <span>{visitedMessage}</span>
+                    <button onClick={() => setVisitedMessage("")} className="text-xs text-gray-500 hover:text-gray-800 font-bold ml-2">
+                      ✕
+                    </button>
+                  </div>
+                )}
+
+                {/* Table */}
+                <div className="overflow-x-auto rounded-2xl border border-gray-200 shadow-sm" ref={printRef}>
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gradient-to-r from-purple-600 to-orange-500 text-white">
+                      <tr>
+                        <th className="px-3 py-3 text-center no-print w-16">
+                          <span className="text-xs font-semibold block">Visited</span>
+                        </th>
+                        <th className="px-3 py-3 text-center print-only">Visited</th>
+                        <th className="px-3 py-3 font-semibold text-center w-12">#</th>
+                        <th className="px-4 py-3 font-semibold">Serial No</th>
+                        <th className="px-4 py-3 font-semibold">Student Name</th>
+                        <th className="px-3 py-3 font-semibold">Age</th>
+                        <th className="px-3 py-3 font-semibold">Gender</th>
+                        <th className="px-3 py-3 font-semibold">Class</th>
+                        <th className="px-3 py-3 font-semibold">Event</th>
+                        <th className="px-3 py-3 font-semibold">Category</th>
+                        <th className="px-3 py-3 font-semibold">Level</th>
+                        <th className="px-3 py-3 font-semibold">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {instructorStudents.map((student, idx) => {
+                        const isVisited = !!visitedMap[student.id];
+                        return (
+                          <tr
+                            key={student.id || idx}
+                            className={`transition-colors ${
+                              isVisited
+                                ? "bg-green-50/70 hover:bg-green-100/60"
+                                : "hover:bg-purple-50/50"
                             }`}
                           >
-                            {student.paymentStatus === "success" ? "Paid" : "Pending"}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                            {/* Checkbox Column (Interactive) */}
+                            <td className="px-3 py-3 text-center no-print">
+                              <input
+                                type="checkbox"
+                                checked={isVisited}
+                                onChange={() => toggleStudentVisited(student.id)}
+                                className="w-5 h-5 text-purple-600 rounded border-gray-300 focus:ring-purple-500 cursor-pointer accent-purple-600"
+                                title="Mark as Visited"
+                              />
+                            </td>
+
+                            {/* Print-only status */}
+                            <td className="px-3 py-3 text-center print-only font-bold">
+                              {isVisited ? "✓ Yes" : "No"}
+                            </td>
+
+                            <td className="px-3 py-3 text-center text-gray-500 font-medium">
+                              {idx + 1}
+                            </td>
+
+                            <td className="px-4 py-3 font-bold text-purple-700">
+                              {student.serialNumber || "—"}
+                            </td>
+
+                            <td className="px-4 py-3 font-semibold text-gray-900">
+                              <div className="flex items-center gap-2">
+                                <span>{student.name}</span>
+                                {isVisited && (
+                                  <span className="text-xs bg-green-200 text-green-800 font-bold px-1.5 py-0.5 rounded no-print">
+                                    Visited
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="px-3 py-3 text-gray-700">{student.age || "—"}</td>
+                            <td className="px-3 py-3 text-gray-700">{student.gender || "—"}</td>
+                            <td className="px-3 py-3 text-gray-700">{student.class || "—"}</td>
+                            <td className="px-3 py-3 capitalize text-gray-700">{student.event || "—"}</td>
+                            <td className="px-3 py-3 capitalize text-gray-700">{student.category || "—"}</td>
+                            <td className="px-3 py-3 capitalize text-gray-700">{student.level || "—"}</td>
+
+                            <td className="px-3 py-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                  student.paymentStatus === "success"
+                                    ? "bg-green-100 text-green-700"
+                                    : "bg-yellow-100 text-yellow-700"
+                                }`}
+                              >
+                                {student.paymentStatus === "success" ? "Paid" : "Pending"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Bottom Action Footer with Save Changes Button */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-gradient-to-r from-purple-50 to-orange-50 rounded-2xl border border-purple-200 no-print">
+                  <div className="text-sm text-gray-700 font-medium">
+                    Marked Visited: <span className="font-bold text-green-700">{visitedCount}</span> of{" "}
+                    <span className="font-bold">{instructorStudents.length}</span> students.
+                    {hasVisitedChanges && (
+                      <span className="ml-2 text-xs bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full font-bold">
+                        Unsaved changes
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={saveVisitedChanges}
+                    disabled={savingVisited}
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 bg-gradient-to-r from-purple-600 to-orange-500 hover:from-purple-700 hover:to-orange-600 text-white rounded-xl font-bold shadow-lg hover:shadow-xl transition-all disabled:opacity-50 text-base"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    {savingVisited ? "Saving to Database..." : "Save Changes"}
+                  </button>
+                </div>
               </div>
             )
           ) : (
             <div className="p-8 text-center bg-gray-50 rounded-2xl border border-dashed border-gray-300 no-print">
               <span className="text-4xl block mb-2">👆</span>
               <p className="text-gray-600 font-medium">
-                Please choose an instructor from the dropdown above to display the student details and print the roster.
+                Please choose an instructor from the dropdown above to display the student details and mark attendance.
               </p>
             </div>
           )}
@@ -452,15 +702,15 @@ const Verify = () => {
                   </span>
                 </div>
                 <div>
-                  <span className="font-semibold text-gray-500 block text-xs">Verification</span>
+                  <span className="font-semibold text-gray-500 block text-xs">Visited</span>
                   <span
                     className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${
-                      participant.verificationStatus === "verified"
+                      participant.visited
                         ? "bg-green-100 text-green-700"
                         : "bg-gray-100 text-gray-700"
                     }`}
                   >
-                    {participant.verificationStatus || "pending"}
+                    {participant.visited ? "✓ Visited" : "Not Visited"}
                   </span>
                 </div>
               </div>
