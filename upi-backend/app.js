@@ -268,7 +268,6 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
         registrationStatus: "PENDING",
         serialNumber: null,
         checkedInAt: null,
-        createdAt: now,
       }));
 
       transaction.create(paymentRef, {

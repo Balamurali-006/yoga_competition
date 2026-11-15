@@ -118,6 +118,8 @@ test("registrations receive a unique six-digit payment reference persisted with 
   const paymentWrites = writes.filter((write) => write.reference.collection === "upiPayments");
   assert.equal(paymentWrites[0].data.paymentReference, first.paymentReference);
   assert.equal(paymentWrites[0].data.participantDrafts[0].paymentReference, first.paymentReference);
+  assert.equal(Object.hasOwn(paymentWrites[0].data.participantDrafts[0], "createdAt"), false);
+  assert.equal(paymentWrites[0].data.createdAt, "test-timestamp");
   assert.equal(paymentWrites[1].data.paymentReference, second.paymentReference);
   assert.equal(counterValue, 100001);
 });
