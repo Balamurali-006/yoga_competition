@@ -15,6 +15,7 @@ import UpiPaymentPage from "./pages/UpiPaymentPage";
 import AdminUpiPayments from "./pages/admin/AdminUpiPayments";
 import AdminCheckIn from "./pages/admin/AdminCheckIn";
 import RegistrationStatus from "./pages/RegistrationStatus";
+import Validation from "./pages/Validation";
 
 /* COMMITTEE PAGES */
 import CommitteeLogin from "./pages/committee/CommitteeLogin";
@@ -58,6 +59,10 @@ function App() {
         <Route path="/status" element={<RegistrationStatus />} />
         <Route path="/upi-payment/:paymentId" element={<UpiPaymentPage />} />
         <Route path="/pay/:pid" element={<UpiPaymentPage />} />
+
+        {/* VALIDATION MODULE */}
+        <Route path="/validation" element={<Validation user={authUser} />} />
+        <Route path="/validation/login" element={<Validation user={authUser} />} />
 
         {/* COMMITTEE ROUTES */}
         <Route path="/committee/login" element={<CommitteeLogin />} />
