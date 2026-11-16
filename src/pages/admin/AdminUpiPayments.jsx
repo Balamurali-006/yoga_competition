@@ -68,11 +68,39 @@ const AdminUpiPayments = () => {
           ...extra,
         }),
       });
-      setMessage(result.alreadyVerified ? "Payment was already verified; existing serial numbers were kept." : "Payment record updated.");
+      setMessage(result.paymentStatus === "VERIFIED" && result.approvalEmailSent
+        ? "Payment verified and serial number email sent."
+        : result.alreadyVerified
+          ? "Payment was already verified; existing serial numbers were kept."
+          : "Payment record updated.");
       await loadPayments();
       if (audit[payment.id]) await loadAudit(payment.id);
     } catch (updateError) {
-      setError(updateError.message);
+      const errorMessage = updateError.message;
+      await loadPayments();
+      setError(errorMessage);
+    } finally {
+      setWorkingId("");
+    }
+  };
+
+  const retrySubmissionNotification = async (payment) => {
+    setWorkingId(payment.id);
+    setError("");
+    setMessage("");
+    try {
+      const result = await adminRequest(
+        `/api/admin/payments/${encodeURIComponent(payment.id)}/retry-submission-notification`,
+        { method: "POST" }
+      );
+      setMessage(result.alreadySent
+        ? "The admin notification was already sent."
+        : "Verification request notification sent to the admin inbox.");
+      await loadPayments();
+    } catch (retryError) {
+      const errorMessage = retryError.message;
+      await loadPayments();
+      setError(errorMessage);
     } finally {
       setWorkingId("");
     }
@@ -163,6 +191,11 @@ const AdminUpiPayments = () => {
                   <p><span className="font-semibold">Submitted:</span> {payment.submittedAt ? new Date(payment.submittedAt).toLocaleString() : "—"}</p>
                   {payment.upiApp && <p><span className="font-semibold">UPI app:</span> {payment.upiApp}</p>}
                 </div>
+                {payment.paymentStatus === "SUBMITTED" && !payment.adminNotificationSent && (
+                  <p className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                    Admin notification email has not been confirmed. The participant can retry submission with the same UTR.
+                  </p>
+                )}
 
                 <div className="mb-4 grid gap-2 sm:grid-cols-2">
                   {payment.participantSummary.map((participant) => (
@@ -207,6 +240,9 @@ const AdminUpiPayments = () => {
                 )}
 
                 <div className="mt-4 flex flex-wrap gap-2">
+                  {payment.paymentStatus === "SUBMITTED" && !payment.adminNotificationSent && (
+                    <button disabled={workingId === payment.id} onClick={() => retrySubmissionNotification(payment)} className="rounded-lg border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-800 disabled:opacity-50">Retry admin notification</button>
+                  )}
                   {payment.paymentStatus === "SUBMITTED" && (
                     <button disabled={workingId === payment.id} onClick={() => updatePayment(payment, "UNDER_REVIEW")} className="rounded-lg border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-800 disabled:opacity-50">Mark under review</button>
                   )}
@@ -217,7 +253,12 @@ const AdminUpiPayments = () => {
                     </>
                   )}
                   {payment.paymentStatus === "VERIFIED" && (
-                    <button disabled={workingId === payment.id} onClick={() => updatePayment(payment, "REFUND_PENDING")} className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">Mark refund pending</button>
+                    <>
+                      {!payment.approvalEmailSent && (
+                        <button disabled={workingId === payment.id} onClick={() => updatePayment(payment, "VERIFIED")} className="rounded-lg border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-800 disabled:opacity-50">Retry serial email</button>
+                      )}
+                      <button disabled={workingId === payment.id} onClick={() => updatePayment(payment, "REFUND_PENDING")} className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">Mark refund pending</button>
+                    </>
                   )}
                   {payment.paymentStatus === "REFUND_PENDING" && (
                     <button disabled={workingId === payment.id} onClick={() => updatePayment(payment, "REFUNDED")} className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">Confirm refunded</button>

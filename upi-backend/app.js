@@ -2,6 +2,7 @@ const cors = require("cors");
 const crypto = require("crypto");
 const express = require("express");
 const multer = require("multer");
+const { sendEmail: sendEmailWithGmail } = require("./email");
 const {
   PAYMENT_STATUSES,
   amountToPaise,
@@ -111,7 +112,14 @@ const isAllowedImage = (buffer, mimeType) => {
   return false;
 };
 
-const createApp = ({ db, admin, storage, env = process.env }) => {
+const createApp = ({
+  db,
+  admin,
+  storage,
+  env = process.env,
+  sendEmail = sendEmailWithGmail,
+  generatePaymentReference = () => crypto.randomInt(100000, 1000000),
+}) => {
   const app = express();
   app.disable("x-powered-by");
   const allowedOrigins = String(env.CORS_ORIGIN || "http://localhost:3000")
@@ -142,6 +150,57 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
   const publicLimiter = makeRateLimiter({ windowMs, max: maxRequests });
   const submitLimiter = makeRateLimiter({ windowMs, max: Math.min(maxRequests, 8) });
   const verificationLimiter = makeRateLimiter({ windowMs, max: Math.max(5, maxRequests) });
+
+  const deliverEmail = async ({ to, subject, text }, failureMessage) => {
+    if (!env.SMTP_USER || !env.SMTP_APP_PASSWORD) {
+      throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
+    }
+
+    try {
+      await sendEmail({
+        from: env.EMAIL_FROM || env.SMTP_USER,
+        to,
+        subject,
+        text,
+      }, {
+        host: env.SMTP_HOST || "smtp.gmail.com",
+        port: Number(env.SMTP_PORT) || 465,
+        secure: String(env.SMTP_SECURE || "true").toLowerCase() !== "false",
+        user: env.SMTP_USER,
+        pass: env.SMTP_APP_PASSWORD,
+      });
+    } catch (error) {
+      console.error("Email notification delivery failed:", error.message);
+      throw new ApiError(502, failureMessage);
+    }
+  };
+
+  const notifyAdminOfSubmission = async (payment, paymentId) => {
+    const participants = payment.participantSummary || [];
+    const participantDetails = participants
+      .map((participant) => `${participant.name || "Participant"} — ${participant.institution || "Institution"} (${participant.email || "no email"})`)
+      .join("\n");
+    const amountPaise = Number(payment.amountPaise || payment.expectedAmountPaise || 0);
+
+    await deliverEmail({
+      to: env.ADMIN_NOTIFICATION_EMAIL || "ekadhmayogaassociation@gmail.com",
+      subject: `Payment verification requested: ${payment.paymentReference || paymentId}`,
+      text: [
+        "A participant submitted UPI payment details for verification.",
+        "",
+        `Payment reference: ${payment.paymentReference || "N/A"}`,
+        `Amount: INR ${(amountPaise / 100).toFixed(2)}`,
+        `UTR: ${payment.utr || "N/A"}`,
+        `Paid at: ${timestampToIso(payment.paymentDateTime) || "Not provided"}`,
+        `UPI app: ${payment.upiApp || "Not provided"}`,
+        "",
+        "Participants:",
+        participantDetails || "Participant details unavailable.",
+        "",
+        "Review this request in the admin UPI payments dashboard.",
+      ].join("\n"),
+    }, "Payment details were saved, but the admin notification could not be sent.");
+  };
 
   const requireConfiguredPayments = (req, res, next) => {
     const feePaise = configuredFeePaise(env);
@@ -236,7 +295,6 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
     const validatedParticipants = participants.map(validateParticipant);
     const paymentGroupId = groupId || db.collection("upiPayments").doc().id;
     const paymentRef = db.collection("upiPayments").doc(paymentGroupId);
-    const referenceCounterRef = db.collection("paymentReferenceCounters").doc("global");
     const participantIds = validatedParticipants.map(() => db.collection("participants").doc().id);
     const accessToken = crypto.randomBytes(32).toString("base64url");
     const creationAuditRef = db.collection("paymentAuditLogs").doc();
@@ -247,66 +305,84 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
       email: participant.email,
       phone: participant.instructorPhone,
     }));
-    const paymentReference = await db.runTransaction(async (transaction) => {
-      const counterSnapshot = await transaction.get(referenceCounterRef);
-      const currentValue = counterSnapshot.exists
-        ? Number(counterSnapshot.data().value) || 0
-        : 99999;
-      if (currentValue >= 999999) {
-        throw new ApiError(503, "Six-digit payment reference capacity has been reached.");
+    let paymentReference = null;
+    for (let attempt = 0; attempt < 20 && !paymentReference; attempt += 1) {
+      const candidate = String(generatePaymentReference());
+      if (!/^\d{6}$/.test(candidate)) {
+        throw new Error("Payment reference generator must return a six-digit number.");
       }
 
-      const nextValue = currentValue + 1;
-      const paymentReference = String(nextValue).padStart(6, "0");
-      const now = admin.firestore.FieldValue.serverTimestamp();
-      const draftParticipants = validatedParticipants.map((participant, index) => ({
-        registrationId: participantIds[index],
-        ...participant,
-        paymentGroupId,
-        paymentReference,
-        paymentStatus: "PENDING",
-        registrationStatus: "PENDING",
-        serialNumber: null,
-        checkedInAt: null,
-      }));
+      const existingPayment = await db.collection("upiPayments")
+        .where("paymentReference", "==", candidate)
+        .limit(1)
+        .get();
+      if (!existingPayment.empty) continue;
 
-      transaction.create(paymentRef, {
-        registrationId: participantIds[0],
-        participantIds,
-        participantSummary,
-        participantDrafts: draftParticipants,
-        participantCount: participantIds.length,
-        paymentReference,
-        amountPaise: feePaise * participantIds.length,
-        expectedAmountPaise: feePaise * participantIds.length,
-        currency: "INR",
-        paymentMethod: "UPI",
-        paymentStatus: "PENDING",
-        utr: null,
-        paymentDateTime: null,
-        upiApp: null,
-        paymentScreenshotUrl: null,
-        submittedAt: null,
-        verifiedAt: null,
-        verifiedBy: null,
-        rejectionReason: null,
-        adminNotes: "",
-        accessTokenHash: hashToken(accessToken),
-        createdAt: now,
-        updatedAt: now,
+      const referenceClaimRef = db.collection("paymentReferenceClaims").doc(candidate);
+      const reserved = await db.runTransaction(async (transaction) => {
+        const claimSnapshot = await transaction.get(referenceClaimRef);
+        if (claimSnapshot.exists) return false;
+
+        const now = admin.firestore.FieldValue.serverTimestamp();
+        const draftParticipants = validatedParticipants.map((participant, index) => ({
+          registrationId: participantIds[index],
+          ...participant,
+          paymentGroupId,
+          paymentReference: candidate,
+          paymentStatus: "PENDING",
+          registrationStatus: "PENDING",
+          serialNumber: null,
+          checkedInAt: null,
+        }));
+
+        transaction.create(referenceClaimRef, {
+          paymentGroupId,
+          paymentReference: candidate,
+          createdAt: now,
+        });
+        transaction.create(paymentRef, {
+          registrationId: participantIds[0],
+          participantIds,
+          participantSummary,
+          participantDrafts: draftParticipants,
+          participantCount: participantIds.length,
+          paymentReference: candidate,
+          amountPaise: feePaise * participantIds.length,
+          expectedAmountPaise: feePaise * participantIds.length,
+          currency: "INR",
+          paymentMethod: "UPI",
+          paymentStatus: "PENDING",
+          utr: null,
+          paymentDateTime: null,
+          upiApp: null,
+          paymentScreenshotUrl: null,
+          submittedAt: null,
+          verifiedAt: null,
+          verifiedBy: null,
+          rejectionReason: null,
+          adminNotes: "",
+          accessTokenHash: hashToken(accessToken),
+          createdAt: now,
+          updatedAt: now,
+        });
+        transaction.create(creationAuditRef, {
+          paymentGroupId,
+          paymentReference: candidate,
+          action: "PAYMENT_CREATED",
+          fromStatus: null,
+          toStatus: "PENDING",
+          actor: "participant",
+          createdAt: now,
+        });
+        return true;
       });
-      transaction.create(creationAuditRef, {
-        paymentGroupId,
-        paymentReference,
-        action: "PAYMENT_CREATED",
-        fromStatus: null,
-        toStatus: "PENDING",
-        actor: "participant",
-        createdAt: now,
-      });
-      transaction.set(referenceCounterRef, { value: nextValue, updatedAt: now });
-      return paymentReference;
-    });
+
+      if (reserved) paymentReference = candidate;
+    }
+
+    if (!paymentReference) {
+      throw new ApiError(503, "Could not allocate a unique six-digit payment reference. Please try again.");
+    }
 
     return {
       paymentGroupId,
@@ -350,7 +426,12 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
     screenshotUpload.single("screenshot"),
     async (req, res, next) => {
       let screenshotFile = null;
+      let submissionCommitted = false;
       try {
+        if (!env.SMTP_USER || !env.SMTP_APP_PASSWORD) {
+          throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
+        }
+
         const utr = normalizeUtr(req.body.utr);
         const amountPaise = amountToPaise(req.body.amount);
         const paymentDateTime = cleanString(req.body.paymentDateTime, 40);
@@ -365,7 +446,7 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
         if (!paymentDateTime || Number.isNaN(parsedDate.getTime())) {
           throw new ApiError(400, "Enter the date and approximate time of payment.");
         }
-        if (req.file) {
+        if (req.file && req.paymentData.paymentStatus !== "SUBMITTED") {
           if (!isAllowedImage(req.file.buffer, req.file.mimetype)) {
             throw new ApiError(400, "The uploaded file is not a valid PNG, JPEG, or WebP image.");
           }
@@ -385,15 +466,21 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
         const claimId = crypto.createHash("sha256").update(utr).digest("hex");
         const claimRef = db.collection("upiUtrClaims").doc(claimId);
         const auditRef = db.collection("paymentAuditLogs").doc();
-        await db.runTransaction(async (transaction) => {
+        const submissionResult = await db.runTransaction(async (transaction) => {
           const paymentSnap = await transaction.get(req.paymentRef);
           const claimSnap = await transaction.get(claimRef);
           if (!paymentSnap.exists) throw new ApiError(404, "Registration payment was not found.");
-          if (claimSnap.exists) throw new ApiError(409, "This UTR has already been submitted.");
-
           const payment = paymentSnap.data();
           if (!safeEqual(payment.accessTokenHash, hashToken(getAccessToken(req)))) {
             throw new ApiError(401, "Registration access token is invalid.");
+          }
+          if (claimSnap.exists) {
+            const claim = claimSnap.data();
+            if (claim.paymentGroupId === req.params.paymentId && payment.utr === utr &&
+              payment.paymentStatus === "SUBMITTED") {
+              return { notificationPending: !payment.adminNotificationSentAt };
+            }
+            throw new ApiError(409, "This UTR has already been submitted.");
           }
           if (!["PENDING", "REJECTED"].includes(payment.paymentStatus)) {
             throw new ApiError(409, "Payment details cannot be submitted in the current status.");
@@ -418,6 +505,7 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
               screenshotContentType: req.file.mimetype,
             } : {}),
             submittedAt: admin.firestore.FieldValue.serverTimestamp(),
+            adminNotificationSentAt: null,
             rejectionReason: null,
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
@@ -429,11 +517,26 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
             actor: "participant",
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
+          return { notificationPending: true };
         });
+        submissionCommitted = true;
+
+        if (submissionResult.notificationPending) {
+          await notifyAdminOfSubmission({
+            ...req.paymentData,
+            amountPaise,
+            utr,
+            paymentDateTime: parsedDate.toISOString(),
+            upiApp,
+          }, req.params.paymentId);
+          await req.paymentRef.update({
+            adminNotificationSentAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
 
         return res.status(201).json({ paymentStatus: "SUBMITTED" });
       } catch (error) {
-        if (screenshotFile) {
+        if (screenshotFile && !submissionCommitted) {
           try {
             await screenshotFile.delete();
           } catch (cleanupError) {
@@ -528,6 +631,8 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
           rejectionReason: payment.rejectionReason || null,
           upiApp: payment.upiApp || null,
           screenshotAvailable: Boolean(payment.screenshotObjectPath),
+          adminNotificationSent: Boolean(payment.adminNotificationSentAt),
+          approvalEmailSent: Boolean(payment.approvalEmailSentAt),
           adminNotes: payment.adminNotes || "",
           createdAt: timestampToIso(payment.createdAt),
         };
@@ -587,6 +692,29 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
     }
   });
 
+  app.post("/api/admin/payments/:paymentId/retry-submission-notification", requireAdmin, async (req, res, next) => {
+    try {
+      const paymentRef = db.collection("upiPayments").doc(req.params.paymentId);
+      const paymentSnap = await paymentRef.get();
+      if (!paymentSnap.exists) throw new ApiError(404, "Payment record was not found.");
+      const payment = paymentSnap.data();
+      if (payment.paymentStatus !== "SUBMITTED") {
+        throw new ApiError(409, "Only submitted payments can receive a verification-request notification.");
+      }
+      if (payment.adminNotificationSentAt) {
+        return res.json({ notificationSent: true, alreadySent: true });
+      }
+
+      await notifyAdminOfSubmission(payment, req.params.paymentId);
+      await paymentRef.update({
+        adminNotificationSentAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return res.json({ notificationSent: true, alreadySent: false });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   app.patch("/api/admin/payments/:paymentId", verificationLimiter, requireAdmin, async (req, res, next) => {
     try {
       const nextStatus = cleanString(req.body.status, 30).toUpperCase();
@@ -597,6 +725,9 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
       if (!PAYMENT_STATUSES.includes(nextStatus)) throw new ApiError(400, "Payment status is invalid.");
       if (nextStatus === "REJECTED" && !reason) {
         throw new ApiError(400, "A rejection reason is required.");
+      }
+      if (nextStatus === "VERIFIED" && (!env.SMTP_USER || !env.SMTP_APP_PASSWORD)) {
+        throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
       }
 
       const paymentRef = db.collection("upiPayments").doc(req.params.paymentId);
@@ -627,6 +758,7 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
             serialNumbers: payment.serialNumbers || [],
             alreadyVerified: true,
             noteUpdated,
+            approvalEmailSent: Boolean(payment.approvalEmailSentAt),
           };
         }
         if (payment.paymentStatus === nextStatus && nextStatus !== "VERIFIED") {
@@ -784,8 +916,50 @@ const createApp = ({ db, admin, storage, env = process.env }) => {
           createdAt: now,
         });
 
-        return { paymentStatus: nextStatus, serialNumbers, alreadyVerified: false };
+        return { paymentStatus: nextStatus, serialNumbers, alreadyVerified: false, approvalEmailSent: false };
       });
+
+      if (nextStatus === "VERIFIED" && !result.approvalEmailSent) {
+        const paymentSnap = await paymentRef.get();
+        const payment = paymentSnap.data();
+        const serialNumbers = payment.serialNumbers || [];
+        const participantSummary = payment.participantSummary || [];
+        const summaryById = new Map(participantSummary.map((participant) => [participant.registrationId, participant]));
+        const recipients = Array.from(new Set(participantSummary.map((participant) => participant.email)
+          .filter((email) => typeof email === "string" && EMAIL_PATTERN.test(email))));
+
+        if (serialNumbers.length === 0 || serialNumbers.some((entry) => !entry.serialNumber)) {
+          throw new ApiError(409, "Payment was approved, but its assigned serial numbers are unavailable.");
+        }
+        if (recipients.length === 0) {
+          throw new ApiError(409, "Payment was approved, but no valid registration contact email is available.");
+        }
+
+        const serialLines = serialNumbers.map((entry) => {
+          const participant = summaryById.get(entry.registrationId) || {};
+          return `${participant.name || "Participant"}: ${entry.serialNumber}`;
+        }).join("\n");
+        await deliverEmail({
+          to: recipients,
+          subject: `Registration approved: ${payment.paymentReference || req.params.paymentId}`,
+          text: [
+            "Your payment has been verified and the registration is confirmed.",
+            "",
+            `Payment reference: ${payment.paymentReference || "N/A"}`,
+            "",
+            "Participant serial numbers:",
+            serialLines || "Serial numbers are not available.",
+            "",
+            "Please keep these serial numbers for competition check-in.",
+          ].join("\n"),
+        }, "Payment was approved, but the registration contact email could not be sent.");
+
+        await paymentRef.update({
+          approvalEmailSentAt: admin.firestore.FieldValue.serverTimestamp(),
+          approvalEmailTo: recipients,
+        });
+        result.approvalEmailSent = true;
+      }
 
       return res.json(result);
     } catch (error) {

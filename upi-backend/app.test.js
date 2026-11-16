@@ -1,9 +1,15 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createApp } = require("./app");
+const { hashToken } = require("./domain");
 
-const startTestServer = async (t, env, { db = {}, admin = {} } = {}) => {
-  const app = createApp({ db, admin, env });
+const startTestServer = async (t, env, {
+  db = {},
+  admin = {},
+  sendEmail,
+  generatePaymentReference,
+} = {}) => {
+  const app = createApp({ db, admin, env, sendEmail, generatePaymentReference });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   t.after(async () => {
@@ -11,6 +17,106 @@ const startTestServer = async (t, env, { db = {}, admin = {} } = {}) => {
     await new Promise((resolve) => server.close(resolve));
   });
   return `http://127.0.0.1:${server.address().port}`;
+};
+
+const createMockFirestore = (initialData = {}) => {
+  const data = new Map(
+    Object.entries(initialData).map(([collection, documents]) => [
+      collection,
+      new Map(Object.entries(documents)),
+    ])
+  );
+  let generatedId = 0;
+  const getCollection = (name) => {
+    if (!data.has(name)) data.set(name, new Map());
+    return data.get(name);
+  };
+  const getSnapshot = (reference) => {
+    const document = getCollection(reference.collection).get(reference.id);
+    return {
+      exists: Boolean(document),
+      id: reference.id,
+      ref: reference,
+      data: () => document,
+    };
+  };
+  const db = {
+    collection(name) {
+      return {
+        doc(id) {
+          return { collection: name, id: id || `${name}-${++generatedId}` };
+        },
+      };
+    },
+    async runTransaction(callback) {
+      const writes = [];
+      const transaction = {
+        async get(reference) {
+          return getSnapshot(reference);
+        },
+        async getAll(...references) {
+          return references.map(getSnapshot);
+        },
+        create(reference, value) {
+          writes.push(() => getCollection(reference.collection).set(reference.id, value));
+        },
+        update(reference, value) {
+          writes.push(() => getCollection(reference.collection).set(reference.id, {
+            ...getCollection(reference.collection).get(reference.id),
+            ...value,
+          }));
+        },
+        set(reference, value) {
+          writes.push(() => getCollection(reference.collection).set(reference.id, value));
+        },
+      };
+      const result = await callback(transaction);
+      writes.forEach((write) => write());
+      return result;
+    },
+  };
+  db.collection = (name) => ({
+    doc(id) {
+      const reference = { collection: name, id: id || `${name}-${++generatedId}` };
+      return {
+        ...reference,
+        async get() {
+          return getSnapshot(reference);
+        },
+        async update(value) {
+          getCollection(name).set(reference.id, {
+            ...getCollection(name).get(reference.id),
+            ...value,
+          });
+        },
+      };
+    },
+    where(field, operator, value) {
+      return {
+        limit(maximum) {
+          return {
+            async get() {
+              const matches = Array.from(getCollection(name).entries())
+                .filter(([, document]) => operator !== "==" || document[field] === value)
+                .slice(0, maximum)
+                .map(([id]) => getSnapshot({ collection: name, id }));
+              return { docs: matches, empty: matches.length === 0, size: matches.length };
+            },
+          };
+        },
+      };
+    },
+  });
+  return { db, data };
+};
+
+const mockAdmin = {
+  auth: () => ({
+    verifyIdToken: async () => ({ uid: "admin-1", email: "admin@example.com" }),
+  }),
+  firestore: {
+    FieldValue: { serverTimestamp: () => "test-timestamp" },
+  },
 };
 
 test("public payment configuration uses server environment values", async (t) => {
@@ -46,44 +152,19 @@ test("registration rejects invalid participant input before writing", async (t) 
   assert.match((await response.json()).error, /Participant details/);
 });
 
-test("registrations receive a unique six-digit payment reference persisted with the payment", async (t) => {
-  let counterValue = null;
-  let generatedId = 0;
-  const writes = [];
-  const db = {
-    collection(name) {
-      return {
-        doc(id) {
-          return { collection: name, id: id || `${name}-${++generatedId}` };
-        },
-      };
-    },
-    async runTransaction(callback) {
-      const transaction = {
-        async get(reference) {
-          return {
-            exists: reference.collection === "paymentReferenceCounters" && counterValue !== null,
-            data: () => ({ value: counterValue }),
-          };
-        },
-        create(reference, data) {
-          writes.push({ operation: "create", reference, data });
-        },
-        set(reference, data) {
-          writes.push({ operation: "set", reference, data });
-          if (reference.collection === "paymentReferenceCounters") counterValue = data.value;
-        },
-      };
-      return callback(transaction);
-    },
-  };
-  const admin = {
-    firestore: { FieldValue: { serverTimestamp: () => "test-timestamp" } },
-  };
+test("registrations get random six-digit references with collision protection", async (t) => {
+  const candidates = [583104, 583104, 472951, 100000, 839257];
+  const { db, data } = createMockFirestore({
+    upiPayments: { "legacy-payment": { paymentReference: "100000" } },
+  });
   const baseUrl = await startTestServer(t, {
     REGISTRATION_FEE: "500",
     UPI_ID: "competition@example",
-  }, { db, admin });
+  }, {
+    db,
+    admin: mockAdmin,
+    generatePaymentReference: () => candidates.shift(),
+  });
   const participant = {
     name: "Test Student",
     age: 12,
@@ -106,22 +187,31 @@ test("registrations receive a unique six-digit payment reference persisted with 
   const first = await firstResponse.json();
   const secondResponse = await createRegistration();
   const second = await secondResponse.json();
+  const thirdResponse = await createRegistration();
+  const third = await thirdResponse.json();
 
   assert.equal(firstResponse.status, 201);
   assert.equal(secondResponse.status, 201);
-  assert.match(first.paymentReference, /^\d{6}$/);
-  assert.match(second.paymentReference, /^\d{6}$/);
-  assert.notEqual(first.paymentReference, second.paymentReference);
-  assert.equal(first.paymentReference, "100000");
-  assert.equal(second.paymentReference, "100001");
+  assert.equal(thirdResponse.status, 201);
+  assert.deepEqual(
+    [first.paymentReference, second.paymentReference, third.paymentReference],
+    ["583104", "472951", "839257"]
+  );
+  assert.ok([first.paymentReference, second.paymentReference, third.paymentReference]
+    .every((reference) => /^\d{6}$/.test(reference)));
+  assert.equal(new Set([first.paymentReference, second.paymentReference, third.paymentReference]).size, 3);
 
-  const paymentWrites = writes.filter((write) => write.reference.collection === "upiPayments");
-  assert.equal(paymentWrites[0].data.paymentReference, first.paymentReference);
-  assert.equal(paymentWrites[0].data.participantDrafts[0].paymentReference, first.paymentReference);
-  assert.equal(Object.hasOwn(paymentWrites[0].data.participantDrafts[0], "createdAt"), false);
-  assert.equal(paymentWrites[0].data.createdAt, "test-timestamp");
-  assert.equal(paymentWrites[1].data.paymentReference, second.paymentReference);
-  assert.equal(counterValue, 100001);
+  const paymentRecords = Array.from(data.get("upiPayments").values())
+    .filter((payment) => payment.paymentReference !== "100000");
+  assert.equal(paymentRecords.length, 3);
+  assert.equal(paymentRecords[0].participantDrafts[0].paymentReference, first.paymentReference);
+  assert.equal(Object.hasOwn(paymentRecords[0].participantDrafts[0], "createdAt"), false);
+  assert.equal(paymentRecords[0].createdAt, "test-timestamp");
+  assert.deepEqual(Array.from(data.get("paymentReferenceClaims").keys()).sort(), [
+    "472951",
+    "583104",
+    "839257",
+  ]);
 });
 
 test("admin payment endpoints reject requests without Firebase credentials", async (t) => {
@@ -134,4 +224,174 @@ test("payment configuration fails closed when UPI settings are missing", async (
   const baseUrl = await startTestServer(t, {});
   const response = await fetch(`${baseUrl}/api/payment/config`);
   assert.equal(response.status, 503);
+});
+
+test("payment submissions email only the admin and same-UTR retry resends a failed notification", async (t) => {
+  const accessToken = "participant-access-token";
+  const payment = {
+    accessTokenHash: hashToken(accessToken),
+    expectedAmountPaise: 50000,
+    paymentReference: "100023",
+    registrationId: "participant-1",
+    participantIds: ["participant-1"],
+    participantSummary: [{
+      registrationId: "participant-1",
+      name: "Test Student",
+      institution: "Test School",
+      email: "coach@example.com",
+    }],
+    paymentStatus: "PENDING",
+    utr: null,
+  };
+  const { db, data } = createMockFirestore({ upiPayments: { "payment-1": payment } });
+  let shouldFail = true;
+  const emailMessages = [];
+  const baseUrl = await startTestServer(t, {
+    SMTP_USER: "ekadhmayogaassociation@gmail.com",
+    SMTP_APP_PASSWORD: "test-app-password",
+    EMAIL_FROM: "Ekadhma <notifications@example.com>",
+    ADMIN_NOTIFICATION_EMAIL: "ekadhmayogaassociation@gmail.com",
+  }, {
+    db,
+    admin: mockAdmin,
+    sendEmail: async (message) => {
+      emailMessages.push(message);
+      if (shouldFail) throw new Error("Provider unavailable");
+    },
+  });
+
+  const submit = () => {
+    const body = new FormData();
+    body.set("utr", "ABCD12345678");
+    body.set("amount", "500");
+    body.set("paymentDateTime", "2026-11-16T08:00");
+    return fetch(`${baseUrl}/api/registrations/payment-1/payment-submissions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body,
+    });
+  };
+
+  const failedResponse = await submit();
+  assert.equal(failedResponse.status, 502);
+  assert.equal((await failedResponse.json()).error, "Payment details were saved, but the admin notification could not be sent.");
+  assert.equal(data.get("upiPayments").get("payment-1").paymentStatus, "SUBMITTED");
+
+  shouldFail = false;
+  const retryResponse = await submit();
+  assert.equal(retryResponse.status, 201);
+  assert.equal(emailMessages.length, 2);
+  assert.equal(emailMessages[0].to, "ekadhmayogaassociation@gmail.com");
+  assert.match(emailMessages[0].text, /ABCD12345678/);
+  assert.equal(data.get("upiPayments").get("payment-1").adminNotificationSentAt, "test-timestamp");
+});
+
+test("admin approval emails assigned serial numbers to the registration contact", async (t) => {
+  const payment = {
+    paymentStatus: "SUBMITTED",
+    paymentReference: "100024",
+    participantIds: ["participant-2"],
+    participantDrafts: [{
+      registrationId: "participant-2",
+      name: "Another Student",
+      institution: "Example School",
+      email: "instructor@example.com",
+    }],
+    participantSummary: [{
+      registrationId: "participant-2",
+      name: "Another Student",
+      institution: "Example School",
+      email: "instructor@example.com",
+    }],
+    expectedAmountPaise: 50000,
+    amountPaise: 50000,
+    utr: "ZXCV12345678",
+  };
+  const claimId = require("node:crypto").createHash("sha256").update(payment.utr).digest("hex");
+  const { db, data } = createMockFirestore({
+    users: { "admin-1": { role: "admin" } },
+    upiPayments: { "payment-2": payment },
+    upiUtrClaims: {
+      [claimId]: { paymentGroupId: "payment-2", claimStatus: "SUBMITTED" },
+    },
+  });
+  const emailMessages = [];
+  let shouldFail = true;
+  const baseUrl = await startTestServer(t, {
+    SMTP_USER: "ekadhmayogaassociation@gmail.com",
+    SMTP_APP_PASSWORD: "test-app-password",
+    EMAIL_FROM: "Ekadhma <notifications@example.com>",
+    CHECKIN_TOKEN_SECRET: "test-checkin-secret",
+  }, {
+    db,
+    admin: mockAdmin,
+    sendEmail: async (message) => {
+      emailMessages.push(message);
+      if (shouldFail) throw new Error("Provider unavailable");
+    },
+  });
+  const approve = () => fetch(`${baseUrl}/api/admin/payments/payment-2`, {
+    method: "PATCH",
+    headers: {
+      Authorization: "Bearer firebase-admin-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status: "VERIFIED", bankRecordConfirmed: true }),
+  });
+
+  const failedResponse = await approve();
+  assert.equal(failedResponse.status, 502);
+  assert.equal(data.get("upiPayments").get("payment-2").paymentStatus, "VERIFIED");
+  shouldFail = false;
+  const response = await approve();
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.approvalEmailSent, true);
+  assert.equal(emailMessages.length, 2);
+  assert.deepEqual(emailMessages[1].to, ["instructor@example.com"]);
+  assert.match(emailMessages[1].text, /Another Student: COMP-\d{4}-001/);
+  assert.equal(data.get("upiPayments").get("payment-2").approvalEmailSentAt, "test-timestamp");
+});
+
+test("admin can retry a missing notification for an already-submitted payment", async (t) => {
+  const payment = {
+    paymentStatus: "SUBMITTED",
+    paymentReference: "100025",
+    amountPaise: 50000,
+    utr: "RETRY123456",
+    paymentDateTime: "2026-11-16T08:00:00.000Z",
+    participantSummary: [{
+      registrationId: "participant-3",
+      name: "Retry Student",
+      institution: "Retry School",
+      email: "coach@example.com",
+    }],
+  };
+  const { db, data } = createMockFirestore({
+    users: { "admin-1": { role: "admin" } },
+    upiPayments: { "payment-3": payment },
+  });
+  const emailMessages = [];
+  const baseUrl = await startTestServer(t, {
+    SMTP_USER: "ekadhmayogaassociation@gmail.com",
+    SMTP_APP_PASSWORD: "test-app-password",
+    EMAIL_FROM: "Ekadhma <notifications@example.com>",
+    ADMIN_NOTIFICATION_EMAIL: "ekadhmayogaassociation@gmail.com",
+  }, {
+    db,
+    admin: mockAdmin,
+    sendEmail: async (message) => emailMessages.push(message),
+  });
+
+  const response = await fetch(`${baseUrl}/api/admin/payments/payment-3/retry-submission-notification`, {
+    method: "POST",
+    headers: { Authorization: "Bearer firebase-admin-token" },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { notificationSent: true, alreadySent: false });
+  assert.equal(emailMessages.length, 1);
+  assert.equal(emailMessages[0].to, "ekadhmayogaassociation@gmail.com");
+  assert.match(emailMessages[0].text, /RETRY123456/);
+  assert.equal(data.get("upiPayments").get("payment-3").adminNotificationSentAt, "test-timestamp");
 });
