@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { login, setCustomAuthUser } from "../../firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../../firebase/firebaseConfig";
+import { login, logout } from "../../firebase/auth";
 
 const CommitteeLogin = () => {
   const navigate = useNavigate();
@@ -17,33 +19,39 @@ const CommitteeLogin = () => {
     setLoading(true);
     setError("");
 
-    const emailTrimmed = form.email.trim().toLowerCase();
-    const passwordTrimmed = form.password;
-
-    // Strict validation: Only committeeuser@gmail.com and password "admin" are allowed
-    if (emailTrimmed !== "committeeuser@gmail.com" || passwordTrimmed !== "admin") {
-      setError("Invalid credentials. Only committeeuser@gmail.com is authorized.");
-      setLoading(false);
-      return;
-    }
-
     try {
-      // Attempt Firebase login if account exists in Firebase Auth
-      await login(form.email.trim(), form.password);
+      const userCredential = await login(form.email.trim(), form.password);
+      const signedInUser = userCredential?.user || null;
+
+      if (!signedInUser) {
+        throw new Error("No user returned from Firebase sign in.");
+      }
+
+      const userDoc = await getDoc(doc(db, "users", signedInUser.uid));
+      const role = userDoc.exists() ? userDoc.data().role : null;
+
+      if (!["committee", "admin"].includes(role)) {
+        await logout();
+        throw new Error(
+          "This account is not authorized for committee access. Please ensure your user document in Firestore 'users/{uid}' has role: 'committee'."
+        );
+      }
+
+      navigate("/committee/verify");
     } catch (err) {
-      // If Firebase Auth does not have this account or fails,
-      // session is authenticated locally for the verified committee user
+      console.error("Committee login error:", err);
+      let msg = err.message || "Committee login failed.";
+      if (
+        err.code === "auth/user-not-found" ||
+        err.code === "auth/wrong-password" ||
+        err.code === "auth/invalid-credential"
+      ) {
+        msg = "Invalid email or password. Please verify your credentials.";
+      }
+      setError(msg);
+    } finally {
+      setLoading(false);
     }
-
-    setCustomAuthUser({
-      uid: "committeeuser",
-      email: "committeeuser@gmail.com",
-      role: "committee",
-      displayName: "Committee Member",
-    });
-
-    navigate("/committee/verify");
-    setLoading(false);
   };
 
   return (

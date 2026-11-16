@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { doc, updateDoc, writeBatch } from "firebase/firestore";
+import { doc, getDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { getIdToken } from "firebase/auth";
 import { db, auth } from "../../firebase/firebaseConfig";
 import { subscribeToCollection } from "../../firebase/firestore";
-import { logout } from "../../firebase/auth";
+import { login, logout } from "../../firebase/auth";
 import { useNavigate } from "react-router-dom";
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
@@ -11,9 +11,15 @@ const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000"
 const Verify = () => {
   const navigate = useNavigate();
 
+  // Local component-level authentication state (forces login on every visit/switch)
+  const [committeeUser, setCommitteeUser] = useState(null);
+  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [loginError, setLoginError] = useState("");
+  const [loggingIn, setLoggingIn] = useState(false);
+
   // Instructor filter state
   const [participantsList, setParticipantsList] = useState([]);
-  const [loadingList, setLoadingList] = useState(true);
+  const [loadingList, setLoadingList] = useState(false);
   const [selectedInstructor, setSelectedInstructor] = useState("");
 
   // Visited state for students under current filter: { [studentId]: boolean }
@@ -30,8 +36,63 @@ const Verify = () => {
 
   const printRef = useRef(null);
 
-  // Subscribe to all participants from Firestore (database)
+  // When leaving/unmounting the Committee module, clear session
   useEffect(() => {
+    return () => {
+      logout();
+    };
+  }, []);
+
+  // Handle Committee Login Submit
+  const handleLoginSubmit = async (e) => {
+    e.preventDefault();
+    setLoggingIn(true);
+    setLoginError("");
+
+    try {
+      const userCredential = await login(loginForm.email.trim(), loginForm.password);
+      const signedInUser = userCredential?.user || null;
+
+      if (!signedInUser) {
+        throw new Error("No user returned from Firebase sign in.");
+      }
+
+      const userDoc = await getDoc(doc(db, "users", signedInUser.uid));
+      const role = userDoc.exists() ? userDoc.data().role : null;
+
+      if (!["committee", "admin"].includes(role)) {
+        await logout();
+        throw new Error(
+          "This account is not authorized for committee access. Please ensure your Firestore document in 'users/{uid}' has role: 'committee'."
+        );
+      }
+
+      setCommitteeUser({ ...signedInUser, role });
+    } catch (err) {
+      console.error("Committee login error:", err);
+      let msg = err.message || "Committee login failed.";
+      if (
+        err.code === "auth/user-not-found" ||
+        err.code === "auth/wrong-password" ||
+        err.code === "auth/invalid-credential"
+      ) {
+        msg = "Invalid email or password. Please verify your credentials.";
+      }
+      setLoginError(msg);
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  // Subscribe to all participants from Firestore (database) only when logged in
+  useEffect(() => {
+    if (!committeeUser) {
+      setParticipantsList([]);
+      setLoadingList(false);
+      return;
+    }
+
+    setLoadingList(true);
     const unsubscribe = subscribeToCollection(
       "participants",
       (items) => {
@@ -44,7 +105,7 @@ const Verify = () => {
       }
     );
     return () => unsubscribe();
-  }, []);
+  }, [committeeUser]);
 
   // Extract unique instructors that exist in the database
   const instructors = useMemo(() => {
@@ -271,8 +332,69 @@ const Verify = () => {
 
   const handleLogout = async () => {
     await logout();
-    navigate("/committee/login");
+    setCommitteeUser(null);
   };
+
+  // ─────────────────────────────────────────────────────────────
+  // VIEW: COMMITTEE LOGIN (shown on every visit/tab switch if not logged in)
+  // ─────────────────────────────────────────────────────────────
+  if (!committeeUser) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-orange-50 flex items-center justify-center p-6 pt-24">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-xl p-8 border border-purple-100">
+          <div className="text-center mb-6">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-purple-600 to-orange-500 text-3xl">
+              🧘
+            </div>
+            <h1 className="mt-4 text-3xl font-bold text-purple-700">Committee Login</h1>
+            <p className="mt-2 text-sm text-gray-600">
+              Enter your committee credentials to access student attendance and verification.
+            </p>
+          </div>
+
+          <form onSubmit={handleLoginSubmit} className="space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700">Email</label>
+              <input
+                type="email"
+                value={loginForm.email}
+                onChange={(e) => setLoginForm((prev) => ({ ...prev, email: e.target.value }))}
+                className="w-full rounded-xl border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                placeholder="committeeuser@gmail.com"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700">Password</label>
+              <input
+                type="password"
+                value={loginForm.password}
+                onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
+                className="w-full rounded-xl border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                placeholder="••••••••"
+                required
+              />
+            </div>
+
+            {loginError && (
+              <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {loginError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loggingIn}
+              className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-orange-500 px-4 py-3 font-semibold text-white disabled:opacity-60 hover:opacity-95 transition-opacity"
+            >
+              {loggingIn ? "Signing in..." : "Login to Committee"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-orange-50 p-4 md:p-8">

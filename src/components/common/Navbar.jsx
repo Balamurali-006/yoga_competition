@@ -19,13 +19,14 @@ const Navbar = () => {
     setOpen(false);
   }, [location]);
 
-  const isActive = (path) => location.pathname === path;
+  const isActive = (path) =>
+    location.pathname === path || (path === "/committee" && location.pathname.startsWith("/committee"));
 
   const navLinks = [
     { path: "/", label: "Home", icon: "🏠" },
     { path: "/register", label: "Register", icon: "📝" },
     { path: "/school-registration", label: "School Entry", icon: "🏫" },
-    { path: "/committee/login", label: "Committee", icon: "👥" },
+    { path: "/committee", label: "Committee", icon: "👥" },
     { path: "/validation", label: "Validation", icon: "⚖️" },
   ];
 

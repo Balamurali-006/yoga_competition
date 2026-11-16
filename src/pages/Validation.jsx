@@ -18,6 +18,8 @@ const Validation = ({ user }) => {
   const [dataError, setDataError] = useState("");
 
   // Filter State
+  const [selectedInstructor, setSelectedInstructor] = useState("");
+  const [selectedInstitution, setSelectedInstitution] = useState("");
   const [selectedClass, setSelectedClass] = useState("");
 
   // In-memory score edits: { [participantId]: { asana1: "", asana2: "", asana3: "", asana4: "", asana5: "" } }
@@ -25,14 +27,12 @@ const Validation = ({ user }) => {
   const [saveStatusMap, setSaveStatusMap] = useState({});
   const [savingId, setSavingId] = useState(null);
 
-  // Only a Firebase-authenticated staff account can read or write score data.
+  // When leaving/unmounting the Validation module, clear session so next visit requires login
   useEffect(() => {
-    if (user && auth.currentUser && ["committee", "admin"].includes(user.role)) {
-      setCurrentUser(user);
-    } else {
-      setCurrentUser(null);
-    }
-  }, [user]);
+    return () => {
+      logout();
+    };
+  }, []);
 
   // Subscribe to participants and saved scorecards from Firestore.
   useEffect(() => {
@@ -116,7 +116,30 @@ const Validation = ({ user }) => {
     });
   }, [participants, savedScoresMap]);
 
-  // Extract unique classes from database participants.
+  // Extract unique instructors
+  const instructors = useMemo(() => {
+    const set = new Set();
+    participants.forEach((p) => {
+      if (p.instructor && typeof p.instructor === "string" && p.instructor.trim()) {
+        set.add(p.instructor.trim());
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [participants]);
+
+  // Extract unique institutions / schools
+  const institutions = useMemo(() => {
+    const set = new Set();
+    participants.forEach((p) => {
+      const inst = p.institution || p.school;
+      if (inst && typeof inst === "string" && inst.trim()) {
+        set.add(inst.trim());
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [participants]);
+
+  // Extract unique classes from database participants
   const classes = useMemo(() => {
     const set = new Set();
     participants.forEach((p) => {
@@ -125,13 +148,28 @@ const Validation = ({ user }) => {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [participants]);
 
-  // Filter students only by their class/grade.
+  // Filter students by selected instructor, institution, and class
   const filteredStudents = useMemo(() => {
-    if (!selectedClass) return participants;
-    return participants.filter(
-      (participant) => (participant.class || "").trim().toLowerCase() === selectedClass.toLowerCase()
-    );
-  }, [participants, selectedClass]);
+    return participants.filter((p) => {
+      if (
+        selectedInstructor &&
+        (p.instructor || "").trim().toLowerCase() !== selectedInstructor.trim().toLowerCase()
+      ) {
+        return false;
+      }
+      const inst = (p.institution || p.school || "").trim().toLowerCase();
+      if (selectedInstitution && inst !== selectedInstitution.trim().toLowerCase()) {
+        return false;
+      }
+      if (
+        selectedClass &&
+        (p.class || "").trim().toLowerCase() !== selectedClass.trim().toLowerCase()
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [participants, selectedInstructor, selectedInstitution, selectedClass]);
 
   // Handle Login
   const handleLoginSubmit = async (e) => {
@@ -153,7 +191,16 @@ const Validation = ({ user }) => {
 
       setCurrentUser({ ...signedInUser, role });
     } catch (error) {
-      setLoginError(error.message || "Could not sign in to the validation page.");
+      console.error("Validation login error:", error);
+      let msg = error.message || "Could not sign in to the validation page.";
+      if (
+        error.code === "auth/user-not-found" ||
+        error.code === "auth/wrong-password" ||
+        error.code === "auth/invalid-credential"
+      ) {
+        msg = "Invalid email or password. Please verify your credentials.";
+      }
+      setLoginError(msg);
     } finally {
       setLoggingIn(false);
     }
@@ -391,18 +438,65 @@ const Validation = ({ user }) => {
             <span>Filter Participants</span>
           </h2>
 
-          <div className="grid grid-cols-1 gap-4">
-            <div className="max-w-xl">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Filter by Instructor */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Filter by Instructor:
+              </label>
+              {loadingParticipants ? (
+                <div className="text-sm text-gray-500 py-2">Loading...</div>
+              ) : (
+                <select
+                  value={selectedInstructor}
+                  onChange={(e) => setSelectedInstructor(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-purple-500 focus:outline-none bg-white text-gray-800 text-sm shadow-sm font-medium"
+                >
+                  <option value="">-- All Instructors --</option>
+                  {instructors.map((inst) => (
+                    <option key={inst} value={inst}>
+                      {inst}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Filter by Institution */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Filter by Institution:
+              </label>
+              {loadingParticipants ? (
+                <div className="text-sm text-gray-500 py-2">Loading...</div>
+              ) : (
+                <select
+                  value={selectedInstitution}
+                  onChange={(e) => setSelectedInstitution(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-purple-500 focus:outline-none bg-white text-gray-800 text-sm shadow-sm font-medium"
+                >
+                  <option value="">-- All Institutions --</option>
+                  {institutions.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Filter by Class */}
+            <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Filter by Class:
               </label>
               {loadingParticipants ? (
-                <div className="text-sm text-gray-500 py-2">Loading classes...</div>
+                <div className="text-sm text-gray-500 py-2">Loading...</div>
               ) : (
                 <select
                   value={selectedClass}
                   onChange={(e) => setSelectedClass(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-purple-500 focus:outline-none bg-white text-gray-800 text-sm md:text-base shadow-sm font-medium"
+                  className="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-purple-500 focus:outline-none bg-white text-gray-800 text-sm shadow-sm font-medium"
                 >
                   <option value="">-- All Classes --</option>
                   {classes.map((className) => (
@@ -418,17 +512,23 @@ const Validation = ({ user }) => {
           {/* Filter Status Badge */}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-gray-100">
             <div className="text-sm text-gray-600 font-medium">
-              Showing <span className="font-bold text-purple-700">{filteredStudents.length}</span> students matching filter
+              Showing <span className="font-bold text-purple-700">{filteredStudents.length}</span> students matching filters
+              {selectedInstructor && <span> · Instructor: <strong className="text-gray-800">{selectedInstructor}</strong></span>}
+              {selectedInstitution && <span> · Institution: <strong className="text-gray-800">{selectedInstitution}</strong></span>}
               {selectedClass && <span> · Class: <strong className="text-gray-800">{selectedClass}</strong></span>}
             </div>
 
-            {selectedClass && (
+            {(selectedInstructor || selectedInstitution || selectedClass) && (
               <button
                 type="button"
-                onClick={() => setSelectedClass("")}
+                onClick={() => {
+                  setSelectedInstructor("");
+                  setSelectedInstitution("");
+                  setSelectedClass("");
+                }}
                 className="text-xs text-purple-600 hover:text-purple-800 font-bold underline"
               >
-                Clear Filters
+                Clear All Filters
               </button>
             )}
           </div>

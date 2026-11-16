@@ -65,9 +65,10 @@ function App() {
         <Route path="/validation" element={<Validation user={authUser} />} />
         <Route path="/validation/login" element={<Validation user={authUser} />} />
 
-        {/* COMMITTEE ROUTES */}
-        <Route path="/committee/login" element={<CommitteeLogin />} />
-        <Route path="/committee/verify" element={<ProtectedRoute user={authUser} loading={authLoading}><Verify /></ProtectedRoute>} />
+        {/* COMMITTEE ROUTES (Requires login on every visit/tab switch) */}
+        <Route path="/committee" element={<Verify />} />
+        <Route path="/committee/login" element={<Verify />} />
+        <Route path="/committee/verify" element={<Verify />} />
         <Route path="/committee/score" element={<ProtectedRoute user={authUser} loading={authLoading}><ScoreEntry /></ProtectedRoute>} />
 
         {/* ADMIN ROUTES */}
