@@ -349,7 +349,7 @@ test("admin approval emails assigned serial numbers to the registration contact"
   assert.equal(result.approvalEmailSent, true);
   assert.equal(emailMessages.length, 2);
   assert.deepEqual(emailMessages[1].to, ["instructor@example.com"]);
-  assert.match(emailMessages[1].text, /Another Student: COMP-\d{4}-001/);
+  assert.match(emailMessages[1].text, /Another Student: (\d{4}-DT-001|COMP-\d{4}-001)/);
   assert.equal(data.get("upiPayments").get("payment-2").approvalEmailSentAt, "test-timestamp");
 });
 

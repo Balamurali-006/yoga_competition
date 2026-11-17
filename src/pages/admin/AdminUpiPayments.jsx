@@ -21,6 +21,11 @@ const AdminUpiPayments = () => {
   const [workingId, setWorkingId] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [expandedStudents, setExpandedStudents] = useState({});
+
+  const toggleStudent = (key) => {
+    setExpandedStudents((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const adminRequest = useCallback(async (path, options = {}) => {
     const user = auth.currentUser;
@@ -169,117 +174,264 @@ const AdminUpiPayments = () => {
         ) : (
           <div className="space-y-5">
             {payments.map((payment) => (
-              <article key={payment.id} className="rounded-2xl bg-white p-5 shadow-lg md:p-6">
-                <div className="flex flex-col justify-between gap-3 border-b pb-4 md:flex-row">
+              <article key={payment.id} className="rounded-2xl bg-white p-5 shadow-lg md:p-6 border border-purple-100">
+                {/* Top Section: Payment Code (bigger), Participants & Amount, Status Badge */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-4">
                   <div>
-                    <h2 className="text-lg font-bold text-gray-900">Registration {payment.registrationId}</h2>
-                    <p className="break-all text-xs text-gray-500">Payment record: {payment.id}</p>
-                    {payment.paymentReference && (
-                      <p className="mt-1 font-mono text-sm font-bold tracking-wider text-purple-700">
-                        Payment code: {payment.paymentReference}
-                      </p>
-                    )}
-                    <p className="text-sm text-gray-600">{payment.participantCount} participant(s) · {formatRupees(payment.expectedAmountPaise)}</p>
+                    <div className="text-xl md:text-2xl font-black text-purple-700 tracking-wider font-mono">
+                      Payment code: {payment.paymentReference || "—"}
+                    </div>
+                    <p className="text-sm font-semibold text-gray-700 mt-1">
+                      {payment.participantCount} participant(s) · {formatRupees(payment.expectedAmountPaise || payment.amountPaise)}
+                    </p>
                   </div>
-                  <span className="h-fit rounded-full bg-purple-100 px-4 py-2 text-sm font-bold text-purple-800">{payment.paymentStatus.replaceAll("_", " ")}</span>
+                  <span
+                    className={`h-fit w-fit rounded-full px-4 py-1.5 text-xs md:text-sm font-extrabold uppercase tracking-wide ${
+                      payment.paymentStatus === "VERIFIED"
+                        ? "bg-green-100 text-green-800 border border-green-200"
+                        : payment.paymentStatus === "REJECTED"
+                        ? "bg-red-100 text-red-800 border border-red-200"
+                        : payment.paymentStatus === "REFUND_PENDING" || payment.paymentStatus === "REFUNDED"
+                        ? "bg-orange-100 text-orange-800 border border-orange-200"
+                        : "bg-purple-100 text-purple-800 border border-purple-200"
+                    }`}
+                  >
+                    {payment.paymentStatus.replaceAll("_", " ")}
+                  </span>
                 </div>
 
-                <div className="grid gap-3 py-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                  <p><span className="font-semibold">UTR:</span> {payment.utr || "Not submitted"}</p>
-                  <p><span className="font-semibold">Amount claimed:</span> {formatRupees(payment.amountPaise)}</p>
-                  <p><span className="font-semibold">Payment date:</span> {payment.paymentDateTime ? new Date(payment.paymentDateTime).toLocaleString() : "—"}</p>
-                  <p><span className="font-semibold">Submitted:</span> {payment.submittedAt ? new Date(payment.submittedAt).toLocaleString() : "—"}</p>
-                  {payment.upiApp && <p><span className="font-semibold">UPI app:</span> {payment.upiApp}</p>}
+                {/* Essential Details Grid: UTR, Payment Date, Submitted */}
+                <div className="grid gap-4 py-4 text-sm sm:grid-cols-3 bg-gray-50/70 p-4 rounded-xl mt-3 border border-gray-100">
+                  <div>
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">UTR</span>
+                    <p className="font-mono font-bold text-gray-900 mt-0.5 break-all">
+                      {payment.utr || "Not submitted"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Payment Date</span>
+                    <p className="font-semibold text-gray-800 mt-0.5">
+                      {payment.paymentDateTime ? new Date(payment.paymentDateTime).toLocaleString() : "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Submitted</span>
+                    <p className="font-semibold text-gray-800 mt-0.5">
+                      {payment.submittedAt ? new Date(payment.submittedAt).toLocaleString() : "—"}
+                    </p>
+                  </div>
                 </div>
-                {payment.paymentStatus === "SUBMITTED" && !payment.adminNotificationSent && (
-                  <p className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
-                    Admin notification email has not been confirmed. The participant can retry submission with the same UTR.
+
+                {/* Participant Students List */}
+                <div className="my-4 space-y-2">
+                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Students</h3>
+                  {payment.participantSummary.map((participant, pIdx) => {
+                    const studentKey = `${payment.id}_${participant.registrationId || pIdx}`;
+                    const isExpanded = !!expandedStudents[studentKey];
+                    return (
+                      <div key={studentKey} className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-xs">
+                        <button
+                          type="button"
+                          onClick={() => toggleStudent(studentKey)}
+                          className="w-full flex items-center justify-between p-3.5 bg-gradient-to-r from-purple-50/60 to-white hover:from-purple-100/70 text-left transition-colors"
+                        >
+                          <div>
+                            <div className="font-bold text-gray-900 flex items-center gap-2">
+                              <span>👤 {participant.name}</span>
+                              <span className="text-xs text-purple-600 font-medium">
+                                ({isExpanded ? "▲ click to hide details" : "▼ click to view details"})
+                              </span>
+                            </div>
+                            <div className="text-xs md:text-sm text-gray-600 font-medium mt-0.5">
+                              Instructor: <span className="text-gray-900 font-semibold">{participant.instructor || "—"}</span>
+                            </div>
+                          </div>
+                          <span className="text-purple-600 font-bold text-sm px-2 py-1 rounded-md bg-purple-100/60">
+                            {isExpanded ? "Less ▲" : "More ▼"}
+                          </span>
+                        </button>
+
+                        {/* Collapsible Details */}
+                        {isExpanded && (
+                          <div className="p-4 bg-gray-50 border-t border-gray-200 text-xs sm:text-sm grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                            <div>
+                              <span className="text-gray-500 font-medium block">School / Institution</span>
+                              <span className="font-semibold text-gray-800">{participant.institution || "—"}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500 font-medium block">Email</span>
+                              <span className="font-semibold text-gray-800">{participant.email || "—"}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500 font-medium block">Phone</span>
+                              <span className="font-semibold text-gray-800">{participant.phone || participant.instructorPhone || "—"}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500 font-medium block">Event & Level</span>
+                              <span className="font-semibold text-gray-800">
+                                {participant.event ? participant.event.toUpperCase() : "—"} / {participant.level ? participant.level.toUpperCase() : "—"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500 font-medium block">Category</span>
+                              <span className="font-semibold text-gray-800">{participant.category || "—"}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500 font-medium block">Class & Age</span>
+                              <span className="font-semibold text-gray-800">
+                                {participant.class || "—"} {participant.age ? `(${participant.age} yrs)` : ""}
+                              </span>
+                            </div>
+                            {participant.serialNumber && (
+                              <div className="sm:col-span-2 md:col-span-3">
+                                <span className="text-gray-500 font-medium block">Official Serial Number</span>
+                                <span className="font-mono font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                                  {participant.serialNumber}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Rejection reason (if any) */}
+                {payment.rejectionReason && (
+                  <p className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-800 border border-red-200">
+                    <strong>Rejection reason:</strong> {payment.rejectionReason}
                   </p>
                 )}
 
-                <div className="mb-4 grid gap-2 sm:grid-cols-2">
-                  {payment.participantSummary.map((participant) => (
-                    <div key={participant.registrationId} className="rounded-xl bg-gray-50 p-3 text-sm">
-                      <p className="font-semibold text-gray-900">{participant.name}</p>
-                      <p className="text-gray-600">{participant.institution}</p>
-                      <p className="text-gray-600">{participant.email} · {participant.phone}</p>
-                      <p className="break-all text-xs text-gray-500">Registration ID: {participant.registrationId}</p>
-                    </div>
-                  ))}
-                </div>
-
-                {payment.rejectionReason && <p className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-800"><strong>Rejection reason:</strong> {payment.rejectionReason}</p>}
-                {payment.screenshotAvailable && (
-                  <div className="mb-4">
-                    {screenshotUrls[payment.id] ? (
-                      <img src={screenshotUrls[payment.id]} alt="Participant's payment screenshot for reference" className="max-h-80 rounded-xl border object-contain" />
-                    ) : (
-                      <button type="button" onClick={() => loadScreenshot(payment.id)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700">View screenshot (reference only)</button>
-                    )}
-                  </div>
-                )}
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label className="text-sm font-medium text-gray-700">
+                {/* Internal Verification Note & Rejection Input for non-verified */}
+                <div className="grid gap-3 md:grid-cols-2 pt-2 border-t border-gray-100">
+                  <label className="text-xs font-semibold text-gray-700">
                     Internal verification note
-                    <textarea value={notes[payment.id] ?? payment.adminNotes} onChange={(event) => setField(setNotes, payment.id, event.target.value)} rows="2" maxLength="1000" className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2" />
+                    <textarea
+                      value={notes[payment.id] ?? payment.adminNotes}
+                      onChange={(event) => setField(setNotes, payment.id, event.target.value)}
+                      rows="2"
+                      maxLength="1000"
+                      placeholder="Add internal note..."
+                      className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-purple-400 focus:outline-none"
+                    />
                   </label>
                   {payment.paymentStatus !== "VERIFIED" && (
-                    <label className="text-sm font-medium text-gray-700">
+                    <label className="text-xs font-semibold text-gray-700">
                       Rejection reason (required to reject)
-                      <textarea value={reasons[payment.id] || ""} onChange={(event) => setField(setReasons, payment.id, event.target.value)} rows="2" maxLength="500" className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2" />
+                      <textarea
+                        value={reasons[payment.id] || ""}
+                        onChange={(event) => setField(setReasons, payment.id, event.target.value)}
+                        rows="2"
+                        maxLength="500"
+                        placeholder="State reason for rejecting payment..."
+                        className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-red-400 focus:outline-none"
+                      />
                     </label>
                   )}
                 </div>
 
+                {/* Bank confirmation checkbox */}
                 {["SUBMITTED", "UNDER_REVIEW"].includes(payment.paymentStatus) && (
-                  <label className="mt-3 flex items-start gap-2 text-sm text-gray-700">
-                    <input type="checkbox" checked={bankConfirmed[payment.id] || false} onChange={(event) => setField(setBankConfirmed, payment.id, event.target.checked)} className="mt-1" />
-                    I confirmed this UTR and exact amount in the organization’s actual bank transaction history.
+                  <label className="mt-3 flex items-start gap-2 text-xs md:text-sm text-gray-700 bg-amber-50/70 p-3 rounded-xl border border-amber-200">
+                    <input
+                      type="checkbox"
+                      checked={bankConfirmed[payment.id] || false}
+                      onChange={(event) => setField(setBankConfirmed, payment.id, event.target.checked)}
+                      className="mt-0.5 rounded text-purple-600"
+                    />
+                    <span>I confirmed this UTR and exact amount in the organization’s actual bank transaction history.</span>
                   </label>
                 )}
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {payment.paymentStatus === "SUBMITTED" && !payment.adminNotificationSent && (
-                    <button disabled={workingId === payment.id} onClick={() => retrySubmissionNotification(payment)} className="rounded-lg border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-800 disabled:opacity-50">Retry admin notification</button>
-                  )}
-                  {payment.paymentStatus === "SUBMITTED" && (
-                    <button disabled={workingId === payment.id} onClick={() => updatePayment(payment, "UNDER_REVIEW")} className="rounded-lg border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-800 disabled:opacity-50">Mark under review</button>
-                  )}
+                {/* Actions Toolbar & Audit History */}
+                <div className="mt-4 flex flex-wrap items-center gap-2 pt-3 border-t border-gray-100">
                   {["SUBMITTED", "UNDER_REVIEW"].includes(payment.paymentStatus) && (
                     <>
-                      <button disabled={workingId === payment.id || !bankConfirmed[payment.id]} onClick={() => updatePayment(payment, "VERIFIED")} className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Approve verified payment</button>
-                      <button disabled={workingId === payment.id || !(reasons[payment.id] || "").trim()} onClick={() => updatePayment(payment, "REJECTED")} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Reject payment</button>
-                    </>
-                  )}
-                  {payment.paymentStatus === "VERIFIED" && (
-                    <>
-                      {!payment.approvalEmailSent && (
-                        <button disabled={workingId === payment.id} onClick={() => updatePayment(payment, "VERIFIED")} className="rounded-lg border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-800 disabled:opacity-50">Retry serial email</button>
+                      <button
+                        disabled={workingId === payment.id || !bankConfirmed[payment.id]}
+                        onClick={() => updatePayment(payment, "VERIFIED")}
+                        className="rounded-xl bg-green-600 hover:bg-green-700 px-4 py-2 text-sm font-bold text-white shadow-xs transition-all disabled:opacity-50"
+                      >
+                        Approve verified payment
+                      </button>
+                      <button
+                        disabled={workingId === payment.id || !(reasons[payment.id] || "").trim()}
+                        onClick={() => updatePayment(payment, "REJECTED")}
+                        className="rounded-xl bg-red-600 hover:bg-red-700 px-4 py-2 text-sm font-bold text-white shadow-xs transition-all disabled:opacity-50"
+                      >
+                        Reject payment
+                      </button>
+                      {payment.paymentStatus === "SUBMITTED" && (
+                        <button
+                          disabled={workingId === payment.id}
+                          onClick={() => updatePayment(payment, "UNDER_REVIEW")}
+                          className="rounded-xl border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+                        >
+                          Mark under review
+                        </button>
                       )}
-                      <button disabled={workingId === payment.id} onClick={() => updatePayment(payment, "REFUND_PENDING")} className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">Mark refund pending</button>
                     </>
                   )}
-                  {payment.paymentStatus === "REFUND_PENDING" && (
-                    <button disabled={workingId === payment.id} onClick={() => updatePayment(payment, "REFUNDED")} className="rounded-lg border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50">Confirm refunded</button>
+
+                  {payment.paymentStatus === "VERIFIED" && (
+                    <button
+                      disabled={workingId === payment.id}
+                      onClick={() => updatePayment(payment, "REFUND_PENDING")}
+                      className="rounded-xl border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      Mark refund pending
+                    </button>
                   )}
-                  <button disabled={workingId === payment.id} onClick={() => updatePayment(payment, payment.paymentStatus)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 disabled:opacity-50">Save note</button>
-                  <button onClick={() => audit[payment.id] ? setAudit((current) => ({ ...current, [payment.id]: null })) : loadAudit(payment.id)} className="rounded-lg border border-purple-300 px-4 py-2 text-sm font-semibold text-purple-700">Audit history</button>
+
+                  {payment.paymentStatus === "REFUND_PENDING" && (
+                    <button
+                      disabled={workingId === payment.id}
+                      onClick={() => updatePayment(payment, "REFUNDED")}
+                      className="rounded-xl border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      Confirm refunded
+                    </button>
+                  )}
+
+                  <button
+                    disabled={workingId === payment.id}
+                    onClick={() => updatePayment(payment, payment.paymentStatus)}
+                    className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Save note
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      audit[payment.id]
+                        ? setAudit((current) => ({ ...current, [payment.id]: null }))
+                        : loadAudit(payment.id)
+                    }
+                    className="rounded-xl border border-purple-300 bg-purple-50 hover:bg-purple-100 px-4 py-2 text-sm font-bold text-purple-700 transition-colors"
+                  >
+                    {audit[payment.id] ? "Hide audit history" : "Audit history"}
+                  </button>
                 </div>
 
+                {/* Audit history list */}
                 {audit[payment.id] && (
-                  <ol className="mt-4 space-y-2 border-l-2 border-purple-200 pl-4 text-sm">
+                  <ol className="mt-4 space-y-2 border-l-2 border-purple-400 pl-4 text-xs md:text-sm bg-purple-50/40 p-3 rounded-r-xl">
+                    <p className="font-bold text-purple-800 mb-1">Audit Trail:</p>
                     {audit[payment.id].map((entry) => (
-                      <li key={entry.id}>
-                        <span className="font-semibold">{entry.action.replaceAll("_", " ")}</span>
+                      <li key={entry.id} className="text-gray-700">
+                        <span className="font-semibold text-gray-900">{entry.action.replaceAll("_", " ")}</span>
                         {entry.fromStatus && <> · {entry.fromStatus} → {entry.toStatus}</>}
-                        {entry.reason && <> · {entry.reason}</>}
-                        {entry.note && <> · {entry.note}</>}
+                        {entry.reason && <> · Reason: {entry.reason}</>}
+                        {entry.note && <> · Note: {entry.note}</>}
                         {entry.bankRecordConfirmed && <> · Bank record confirmed by admin</>}
-                        <span className="ml-2 text-xs text-gray-500">{entry.createdAt ? new Date(entry.createdAt).toLocaleString() : ""}</span>
+                        <span className="ml-2 text-xs text-gray-400">
+                          {entry.createdAt ? new Date(entry.createdAt).toLocaleString() : ""}
+                        </span>
                       </li>
                     ))}
-                    {audit[payment.id].length === 0 && <li>No audit events recorded.</li>}
+                    {audit[payment.id].length === 0 && <li className="text-gray-500">No audit events recorded.</li>}
                   </ol>
                 )}
               </article>
