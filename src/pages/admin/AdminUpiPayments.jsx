@@ -16,7 +16,6 @@ const AdminUpiPayments = () => {
   const [reasons, setReasons] = useState({});
   const [bankConfirmed, setBankConfirmed] = useState({});
   const [audit, setAudit] = useState({});
-  const [screenshotUrls, setScreenshotUrls] = useState({});
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState("");
   const [error, setError] = useState("");
@@ -89,53 +88,12 @@ const AdminUpiPayments = () => {
     }
   };
 
-  const retrySubmissionNotification = async (payment) => {
-    setWorkingId(payment.id);
-    setError("");
-    setMessage("");
-    try {
-      const result = await adminRequest(
-        `/api/admin/payments/${encodeURIComponent(payment.id)}/retry-submission-notification`,
-        { method: "POST" }
-      );
-      setMessage(result.alreadySent
-        ? "The admin notification was already sent."
-        : "Verification request notification sent to the admin inbox.");
-      await loadPayments();
-    } catch (retryError) {
-      const errorMessage = retryError.message;
-      await loadPayments();
-      setError(errorMessage);
-    } finally {
-      setWorkingId("");
-    }
-  };
-
   const loadAudit = async (paymentId) => {
     try {
       const result = await adminRequest(`/api/admin/payments/${encodeURIComponent(paymentId)}/audit`);
       setAudit((current) => ({ ...current, [paymentId]: result.entries || [] }));
     } catch (auditError) {
       setError(auditError.message);
-    }
-  };
-
-  const loadScreenshot = async (paymentId) => {
-    try {
-      const user = auth.currentUser;
-      if (!user) throw new Error("Please sign in again as an administrator.");
-      const response = await fetch(
-        `${process.env.REACT_APP_UPI_API_BASE_URL || "http://localhost:5001"}/api/admin/payments/${encodeURIComponent(paymentId)}/screenshot`,
-        { headers: { Authorization: `Bearer ${await getIdToken(user)}` } }
-      );
-      if (!response.ok) {
-        const result = await response.json();
-        throw new Error(result.error || "Could not load screenshot.");
-      }
-      const url = URL.createObjectURL(await response.blob());
-      setScreenshotUrls((current) => ({ ...current, [paymentId]: url }));
-    } catch (screenshotError) {
-      setError(screenshotError.message);
     }
   };
 

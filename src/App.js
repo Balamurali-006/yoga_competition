@@ -14,11 +14,9 @@ import SchoolRegistration from "./pages/SchoolRegistration";
 import UpiPaymentPage from "./pages/UpiPaymentPage";
 import AdminUpiPayments from "./pages/admin/AdminUpiPayments";
 import AdminCheckIn from "./pages/admin/AdminCheckIn";
-import RegistrationStatus from "./pages/RegistrationStatus";
 import Validation from "./pages/Validation";
 
 /* COMMITTEE PAGES */
-import CommitteeLogin from "./pages/committee/CommitteeLogin";
 import AdminLogin from "./pages/admin/AdminLogin";
 import Verify from "./pages/committee/Verify";
 import ScoreEntry from "./pages/committee/ScoreEntry";
@@ -57,7 +55,6 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/register" element={<IndividualRegistration />} />
         <Route path="/school-registration" element={<SchoolRegistration />} />
-        <Route path="/status" element={<RegistrationStatus />} />
         <Route path="/upi-payment/:paymentId" element={<UpiPaymentPage />} />
         <Route path="/pay/:pid" element={<UpiPaymentPage />} />
 

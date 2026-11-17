@@ -229,6 +229,30 @@ const createApp = ({
     }
   };
 
+  const requireStaff = async (req, res, next) => {
+    const authorization = req.headers.authorization || "";
+    const idToken = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+    if (!idToken) return res.status(401).json({ error: "Committee authentication is required." });
+
+    let decoded;
+    try {
+      decoded = await admin.auth().verifyIdToken(idToken);
+    } catch (error) {
+      return res.status(401).json({ error: "The authentication token is invalid or expired." });
+    }
+
+    try {
+      const profile = await db.collection("users").doc(decoded.uid).get();
+      if (!profile.exists || !["admin", "committee"].includes(profile.data().role)) {
+        return res.status(403).json({ error: "Committee access is required." });
+      }
+      req.staffUser = { uid: decoded.uid, email: decoded.email || null };
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  };
+
   const getAccessToken = (req) => {
     const authorization = req.headers.authorization || "";
     return authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
@@ -253,6 +277,84 @@ const createApp = ({
   };
 
   app.get("/health", (req, res) => res.json({ status: "ok", service: "upi-registration-api" }));
+
+  app.get("/api/participants/search", requireStaff, async (req, res, next) => {
+    try {
+      const query = cleanString(req.query.q, 120).toLowerCase();
+      if (!query) return res.json({ participants: [] });
+
+      const snapshot = await db.collection("participants").get();
+      const participants = [];
+      for (const document of snapshot.docs) {
+        if (participants.length >= 20) break;
+        const participant = document.data();
+        const searchable = [
+          participant.name,
+          participant.email,
+          participant.instructorPhone,
+          participant.serialNumber,
+          participant.institution,
+        ].filter(Boolean).join(" ").toLowerCase();
+        if (!searchable.includes(query)) continue;
+
+        participants.push({
+          id: document.id,
+          name: participant.name || null,
+          email: participant.email || null,
+          institution: participant.institution || null,
+          instructorPhone: participant.instructorPhone || null,
+          serialNumber: participant.serialNumber || null,
+          event: participant.event || null,
+          category: participant.category || null,
+          level: participant.level || null,
+          paymentStatus: participant.paymentStatus || null,
+          verificationStatus: participant.verificationStatus || null,
+        });
+      }
+      return res.json({ participants });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  app.post("/api/admin/users", requireAdmin, async (req, res, next) => {
+    const email = cleanString(req.body?.email, 254).toLowerCase();
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    const name = cleanString(req.body?.name, 120);
+    const role = req.body?.role;
+    if (!EMAIL_PATTERN.test(email) || password.length < 8 || !["admin", "committee"].includes(role)) {
+      return res.status(400).json({
+        error: "Enter a valid email, a password of at least 8 characters, and a valid role.",
+      });
+    }
+
+    let createdUser;
+    try {
+      createdUser = await admin.auth().createUser({ email, password, displayName: name });
+      try {
+        await db.collection("users").doc(createdUser.uid).set({
+          uid: createdUser.uid,
+          email: createdUser.email,
+          name,
+          role,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } catch (error) {
+        try {
+          await admin.auth().deleteUser(createdUser.uid);
+        } catch (cleanupError) {
+          console.error("Failed to roll back an incomplete user account:", cleanupError);
+        }
+        throw error;
+      }
+      return res.status(201).json({ uid: createdUser.uid, email: createdUser.email, name, role });
+    } catch (error) {
+      if (error.code === "auth/email-already-exists") {
+        return res.status(409).json({ error: "An account with this email already exists." });
+      }
+      return next(error);
+    }
+  });
 
   app.get("/api/payment/config", requireConfiguredPayments, (req, res) => {
     res.json({

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { getIdToken } from "firebase/auth";
 import { auth } from "../../firebase/firebaseConfig";
 import { subscribeToCollection, updateCollectionDocument, deleteCollectionDocument } from "../../firebase/firestore";
+import { upiApiRequest } from "../../firebase/upiApi";
 
 const ManageUsers = () => {
   const [users, setUsers] = useState([]);
@@ -47,17 +48,11 @@ const ManageUsers = () => {
         const currentUser = auth.currentUser;
         if (!currentUser) throw new Error("Sign in again before creating users.");
 
-        const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
-        const response = await fetch(`${apiBaseUrl}/admin/users`, {
+        await upiApiRequest("/api/admin/users", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${await getIdToken(currentUser)}`,
-          },
+          accessToken: await getIdToken(currentUser),
           body: JSON.stringify(form),
         });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Could not create user.");
 
         resetForm();
       }

@@ -4,8 +4,7 @@ import { getIdToken } from "firebase/auth";
 import { db, auth } from "../../firebase/firebaseConfig";
 import { subscribeToCollection } from "../../firebase/firestore";
 import { login, logout } from "../../firebase/auth";
-
-const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
+import { upiApiRequest } from "../../firebase/upiApi";
 
 const Verify = () => {
   // Local component-level authentication state (forces login on every visit/switch)
@@ -287,28 +286,10 @@ const Verify = () => {
         token = await getIdToken(auth.currentUser);
       }
 
-      const response = await fetch(`${apiBaseUrl}/search-participants?q=${encodeURIComponent(queryValue)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-
-      if (!response.ok) {
-        // Fallback to local participantsList search if server auth requirement differs
-        const term = queryValue.toLowerCase();
-        const localMatch = participantsList.find(
-          (p) =>
-            (p.name || "").toLowerCase().includes(term) ||
-            (p.serialNumber || "").toLowerCase().includes(term) ||
-            (p.email || "").toLowerCase().includes(term) ||
-            (p.instructorPhone || "").includes(term)
-        );
-        if (localMatch) {
-          setParticipant(localMatch);
-          return;
-        }
-        throw new Error("Search request failed");
-      }
-
-      const data = await response.json();
+      const data = await upiApiRequest(
+        `/api/participants/search?q=${encodeURIComponent(queryValue)}`,
+        { accessToken: token }
+      );
       const results = data.participants || [];
 
       if (results.length === 0) {
@@ -318,21 +299,9 @@ const Verify = () => {
         setParticipant(results[0]);
       }
     } catch (error) {
-      // Fallback local search
-      const term = queryValue.toLowerCase();
-      const localMatch = participantsList.find(
-        (p) =>
-          (p.name || "").toLowerCase().includes(term) ||
-          (p.serialNumber || "").toLowerCase().includes(term) ||
-          (p.email || "").toLowerCase().includes(term) ||
-          (p.instructorPhone || "").includes(term)
-      );
-      if (localMatch) {
-        setParticipant(localMatch);
-      } else {
-        setParticipant(null);
-        setMessage("No participant found for that search.");
-      }
+      console.error("Participant search failed:", error);
+      setParticipant(null);
+      setMessage(error.message || "Could not search participants right now.");
     } finally {
       setLoading(false);
     }

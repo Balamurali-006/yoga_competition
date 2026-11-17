@@ -1,6 +1,6 @@
-# Isolated UPI Registration Backend
+# UPI Registration Backend
 
-This service adds manual UPI payment submission, admin verification, serial-number assignment, and check-in APIs without changing the existing `server/` Razorpay backend. It uses the application's existing Firebase Authentication and Cloud Firestore project.
+This is the application's active Express API for manual UPI payment submission, admin verification, serial-number assignment, committee participant search, user provisioning, and check-in. It uses the application's Firebase Authentication and Cloud Firestore project.
 
 ## Requirements and setup
 
@@ -93,12 +93,21 @@ The API uses the Admin SDK for registration and payment writes. Firestore client
 
 Registration creation returns a randomly generated, unique six-digit `paymentReference`, `paymentGroupId`, participant registration IDs, expected amount, and a one-time registration access token. The reference remains stable for that payment, is stored with the payment and participant drafts, displayed to the instructor, and prefilled in the UPI transaction reference/note. It is a payment identifier, not an authentication code; the private access token protects registration access. UPI apps may omit notes from bank records, so the code is an aid for matching only; administrators must still verify the UTR and amount against bank records. The frontend keeps the access token in the browser session and sends it as `Authorization: Bearer <token>` for participant status and payment submissions.
 
+### Staff endpoint
+
+Committee and admin Firebase users can search participant name, email, instructor phone, serial number, and institution:
+
+| Method and path | Description |
+|-----------------|-------------|
+| `GET /api/participants/search?q=` | Search up to 20 matching participants |
+
 ### Admin endpoints
 
 All admin endpoints require a Firebase ID token belonging to a user whose Firestore `users/{uid}.role` is `admin`.
 
 | Method and path | Description |
 |-----------------|-------------|
+| `POST /api/admin/users` | Create a Firebase Auth user and Firestore user profile |
 | `GET /api/admin/payments?status=ALL&q=` | Search/filter payment records |
 | `GET /api/admin/payments/:paymentId/audit` | Read the payment audit history |
 | `GET /api/admin/payments/:paymentId/screenshot` | Privately retrieve an optional screenshot |
@@ -117,7 +126,8 @@ The participant confirmation page shows a signed QR token for each verified regi
 - The in-memory rate limiter is suitable for a single API process. Use a shared rate-limit store before running multiple instances.
 - Configure Firestore and Storage IAM/rules for production and serve the frontend/API over HTTPS.
 - No bank API or statement import is configured; manual bank-record verification is the only approval path.
-- The legacy Razorpay service remains in `server/` and is not used by the updated registration UI.
+
+For Render, create a Blueprint from the repository's `render.yaml`, or create a Web Service with `upi-backend/` as the root directory, `npm install` as the build command, and `npm start` as the start command. Set all required values from `.env.example` in Render's environment settings. Set `CORS_ORIGIN` to the exact Vercel frontend origin, and configure the Vercel `REACT_APP_UPI_API_BASE_URL` to the Render service URL.
 
 Run backend unit tests with:
 

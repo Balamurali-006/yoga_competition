@@ -83,6 +83,9 @@ const createMockFirestore = (initialData = {}) => {
         async get() {
           return getSnapshot(reference);
         },
+        async set(value) {
+          getCollection(name).set(reference.id, value);
+        },
         async update(value) {
           getCollection(name).set(reference.id, {
             ...getCollection(name).get(reference.id),
@@ -90,6 +93,11 @@ const createMockFirestore = (initialData = {}) => {
           });
         },
       };
+    },
+    async get() {
+      const docs = Array.from(getCollection(name).keys())
+        .map((id) => getSnapshot({ collection: name, id }));
+      return { docs, size: docs.length, empty: docs.length === 0 };
     },
     where(field, operator, value) {
       return {
@@ -218,6 +226,124 @@ test("admin payment endpoints reject requests without Firebase credentials", asy
   const baseUrl = await startTestServer(t, {});
   const response = await fetch(`${baseUrl}/api/admin/payments`);
   assert.equal(response.status, 401);
+});
+
+test("participant search is restricted to staff and returns matching participant fields", async (t) => {
+  const { db } = createMockFirestore({
+    users: { "committee-1": { role: "committee" }, "other-1": { role: "participant" } },
+    participants: {
+      "participant-1": {
+        name: "Yoga Student",
+        email: "student@example.com",
+        instructorPhone: "9876543210",
+        institution: "Yoga School",
+        serialNumber: "2026-DT-1234",
+        paymentStatus: "VERIFIED",
+      },
+      "participant-2": { name: "Another Student" },
+    },
+  });
+  const baseUrl = await startTestServer(t, {}, {
+    db,
+    admin: {
+      ...mockAdmin,
+      auth: () => ({
+        verifyIdToken: async (token) => ({ uid: token }),
+      }),
+    },
+  });
+
+  const unauthorized = await fetch(`${baseUrl}/api/participants/search?q=yoga`);
+  assert.equal(unauthorized.status, 401);
+
+  const forbidden = await fetch(`${baseUrl}/api/participants/search?q=yoga`, {
+    headers: { Authorization: "Bearer other-1" },
+  });
+  assert.equal(forbidden.status, 403);
+
+  const response = await fetch(`${baseUrl}/api/participants/search?q=YOGA`, {
+    headers: { Authorization: "Bearer committee-1" },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    participants: [{
+      id: "participant-1",
+      name: "Yoga Student",
+      email: "student@example.com",
+      institution: "Yoga School",
+      instructorPhone: "9876543210",
+      serialNumber: "2026-DT-1234",
+      event: null,
+      category: null,
+      level: null,
+      paymentStatus: "VERIFIED",
+      verificationStatus: null,
+    }],
+  });
+});
+
+test("admin user creation validates input and writes both Firebase records", async (t) => {
+  const { db, data } = createMockFirestore({
+    users: {
+      "admin-1": { role: "admin" },
+      "committee-1": { role: "committee" },
+    },
+  });
+  let createdUserInput;
+  const admin = {
+    ...mockAdmin,
+    auth: () => ({
+      verifyIdToken: async (token) => ({ uid: token, email: `${token}@example.com` }),
+      createUser: async (input) => {
+        createdUserInput = input;
+        return { uid: "new-user-1", email: input.email };
+      },
+      deleteUser: async () => {},
+    }),
+  };
+  const baseUrl = await startTestServer(t, {}, { db, admin });
+
+  const invalidResponse = await fetch(`${baseUrl}/api/admin/users`, {
+    method: "POST",
+    headers: { Authorization: "Bearer admin-1", "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "bad-email", password: "short", role: "owner" }),
+  });
+  assert.equal(invalidResponse.status, 400);
+  assert.equal(createdUserInput, undefined);
+
+  const validUserInput = {
+    email: "NEW-USER@example.com",
+    password: "temporary-password",
+    name: "New User",
+    role: "committee",
+  };
+  const forbiddenResponse = await fetch(`${baseUrl}/api/admin/users`, {
+    method: "POST",
+    headers: { Authorization: "Bearer committee-1", "Content-Type": "application/json" },
+    body: JSON.stringify(validUserInput),
+  });
+  assert.equal(forbiddenResponse.status, 403);
+  assert.equal(createdUserInput, undefined);
+
+  const response = await fetch(`${baseUrl}/api/admin/users`, {
+    method: "POST",
+    headers: { Authorization: "Bearer admin-1", "Content-Type": "application/json" },
+    body: JSON.stringify(validUserInput),
+  });
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), {
+    uid: "new-user-1",
+    email: "new-user@example.com",
+    name: "New User",
+    role: "committee",
+  });
+  assert.deepEqual(createdUserInput, {
+    email: "new-user@example.com",
+    password: "temporary-password",
+    displayName: "New User",
+  });
+  assert.equal(data.get("users").get("new-user-1").role, "committee");
+  assert.equal(data.get("users").get("new-user-1").createdAt, "test-timestamp");
 });
 
 test("payment configuration fails closed when UPI settings are missing", async (t) => {

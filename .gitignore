@@ -1,29 +1,29 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Dependencies
+node_modules/
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
-
-# testing
+# Production and test output
+/build
 /coverage
 
-# production
-/build
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+serviceAccountKey.json
 
-# misc
-.DS_Store
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# Removed legacy backend
+/server/
 
+# Firebase and deployment tooling
+.firebase/
+.firebase-debug.log*
+.vercel/
+.eslintcache
+
+# Logs and operating system files
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-
-.env
-serviceAccountKey.json
-/upi-backend/node_modules/
-
+*.log
+.DS_Store
+Thumbs.db
