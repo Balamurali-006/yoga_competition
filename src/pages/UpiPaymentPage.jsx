@@ -183,18 +183,54 @@ const UpiPaymentPage = () => {
                     Copy UPI ID
                   </button>
                 </div>
-                <a href={upiLink} className="inline-flex rounded-xl bg-purple-700 px-4 py-3 font-semibold text-white hover:bg-purple-800">
-                  Open a UPI app
-                </a>
+
+                {/* Direct Mobile UPI App Launchers */}
+                <div>
+                  <p className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-2">
+                    Pay Directly from Your Phone
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <a
+                      href={upiLink}
+                      className="flex items-center justify-center gap-2 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-700 font-bold text-xs hover:bg-blue-100 transition-colors shadow-sm"
+                    >
+                      <span>🔵</span>
+                      <span>Google Pay</span>
+                    </a>
+                    <a
+                      href={upiLink}
+                      className="flex items-center justify-center gap-2 px-3 py-2.5 bg-purple-50 border border-purple-200 rounded-xl text-purple-700 font-bold text-xs hover:bg-purple-100 transition-colors shadow-sm"
+                    >
+                      <span>🟣</span>
+                      <span>PhonePe</span>
+                    </a>
+                    <a
+                      href={upiLink}
+                      className="flex items-center justify-center gap-2 px-3 py-2.5 bg-sky-50 border border-sky-200 rounded-xl text-sky-700 font-bold text-xs hover:bg-sky-100 transition-colors shadow-sm"
+                    >
+                      <span>🔷</span>
+                      <span>Paytm</span>
+                    </a>
+                    <a
+                      href={upiLink}
+                      className="flex items-center justify-center gap-2 px-3 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 rounded-xl text-white font-bold text-xs hover:opacity-95 transition-opacity shadow-sm"
+                    >
+                      <span>📱</span>
+                      <span>Any UPI App</span>
+                    </a>
+                  </div>
+                </div>
+
                 {config.qrCodeUrl && (
                   <div>
                     <p className="mb-2 text-sm font-medium text-gray-700">Organization payment QR</p>
                     <img src={config.qrCodeUrl} alt="Organization UPI payment QR code" className="mx-auto max-h-52 max-w-full rounded-lg border p-2" />
                   </div>
                 )}
-                <div className="text-center">
-                  <p className="mb-2 text-sm font-medium text-gray-700">QR with this registration amount</p>
-                  <div className="inline-block rounded-xl border bg-white p-3">
+                <div className="text-center bg-purple-50/50 p-4 rounded-2xl border border-purple-100">
+                  <p className="mb-1 text-sm font-bold text-gray-800">Scan QR with Any UPI App</p>
+                  <p className="mb-3 text-xs text-gray-500">Scan via GPay, PhonePe, Paytm, or BHIM</p>
+                  <div className="inline-block rounded-2xl border-2 border-purple-200 bg-white p-3 shadow-md">
                     <QRCodeSVG value={upiLink} size={180} level="M" includeMargin />
                   </div>
                 </div>

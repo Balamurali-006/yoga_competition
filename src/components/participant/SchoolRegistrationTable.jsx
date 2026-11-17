@@ -427,17 +427,17 @@ const SchoolRegistrationTable = () => {
               </button>
 
               <div className="flex-1 flex flex-col sm:flex-row items-center gap-3">
-                <div className="flex items-center gap-2 text-sm text-gray-600 font-medium bg-purple-100 px-4 py-2 rounded-xl">
+                <div className="flex items-center gap-2 text-sm text-gray-700 font-medium bg-purple-100 px-4 py-2.5 rounded-xl border border-purple-200">
                   <span>
-                    {students.length} student{students.length !== 1 ? "s" : ""}
+                    👥 <strong>{students.length}</strong> student{students.length !== 1 ? "s" : ""}
                   </span>
-                  <span className="text-purple-700 font-bold">· Fee shown at payment</span>
+                  <span className="text-purple-700 font-extrabold">· Total: ₹{students.length * 2}</span>
                 </div>
 
                 <button
                   type="submit"
                   disabled={!isFormValid || saving}
-                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-orange-500 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-orange-600 transition-all shadow-lg disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed disabled:shadow-none"
+                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-orange-500 text-white rounded-xl font-bold hover:from-purple-700 hover:to-orange-600 transition-all shadow-lg disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed disabled:shadow-none"
                 >
                   <svg
                     className="w-5 h-5"
@@ -452,11 +452,41 @@ const SchoolRegistrationTable = () => {
                       d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
                     />
                   </svg>
-                  {saving ? "Saving..." : "Submit Registration"}
+                  {saving ? "Processing..." : `Proceed to Pay (₹${students.length * 2})`}
                 </button>
               </div>
             </div>
           </form>
+
+          {/* Sticky Floating Bottom Summary Bar for Quick Action */}
+          <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-8 sm:w-auto z-40 bg-white/95 backdrop-blur-md border-2 border-purple-300 shadow-2xl rounded-2xl p-3 sm:px-6 sm:py-3.5 flex items-center justify-between sm:justify-start gap-4 transition-all">
+            <div className="text-left">
+              <span className="text-xs text-gray-500 font-medium block">Batch Total</span>
+              <span className="text-base sm:text-lg font-black text-purple-700">
+                {students.length} Students · ₹{students.length * 2}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={addRow}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded-xl text-xs border border-purple-200 transition-colors"
+              >
+                <span>+</span>
+                <span>Add More</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={!isFormValid || saving}
+                className="px-4 sm:px-5 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 text-white text-sm font-bold rounded-xl shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {saving ? "Saving..." : "Pay Now →"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -4,16 +4,14 @@ import { getIdToken } from "firebase/auth";
 import { db, auth } from "../../firebase/firebaseConfig";
 import { subscribeToCollection } from "../../firebase/firestore";
 import { login, logout } from "../../firebase/auth";
-import { useNavigate } from "react-router-dom";
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "http://localhost:5000";
 
 const Verify = () => {
-  const navigate = useNavigate();
-
   // Local component-level authentication state (forces login on every visit/switch)
   const [committeeUser, setCommitteeUser] = useState(null);
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
 
@@ -125,6 +123,37 @@ const Verify = () => {
       (p) => (p.instructor || "").trim().toLowerCase() === selectedInstructor.trim().toLowerCase()
     );
   }, [participantsList, selectedInstructor]);
+
+  // Inline search filter within selected instructor's students
+  const [studentSearchQuery, setStudentSearchQuery] = useState("");
+
+  const displayedStudents = useMemo(() => {
+    if (!studentSearchQuery.trim()) return instructorStudents;
+    const q = studentSearchQuery.trim().toLowerCase();
+    return instructorStudents.filter(
+      (s) =>
+        (s.name || "").toLowerCase().includes(q) ||
+        (s.serialNumber || "").toLowerCase().includes(q) ||
+        (s.class || "").toLowerCase().includes(q) ||
+        (s.category || "").toLowerCase().includes(q)
+    );
+  }, [instructorStudents, studentSearchQuery]);
+
+  const highlightText = (text, query) => {
+    if (!query || !text) return text;
+    const q = query.trim();
+    if (!q) return text;
+    const parts = String(text).split(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"));
+    return parts.map((part, i) =>
+      part.toLowerCase() === q.toLowerCase() ? (
+        <mark key={i} className="bg-yellow-200 text-yellow-900 rounded px-0.5 font-bold">
+          {part}
+        </mark>
+      ) : (
+        part
+      )
+    );
+  };
 
   // When selected instructor changes, initialize visitedMap from database values
   useEffect(() => {
@@ -367,14 +396,24 @@ const Verify = () => {
 
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700">Password</label>
-              <input
-                type="password"
-                value={loginForm.password}
-                onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
-                className="w-full rounded-xl border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                placeholder="••••••••"
-                required
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={loginForm.password}
+                  onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
+                  className="w-full rounded-xl border border-gray-300 pl-4 pr-11 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="••••••••"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 text-sm select-none"
+                  title={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? "👁️‍🗨️" : "👁️"}
+                </button>
+              </div>
             </div>
 
             {loginError && (
@@ -538,11 +577,14 @@ const Verify = () => {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="bg-white px-3 py-1.5 rounded-xl border border-purple-200 text-sm font-bold text-purple-700 shadow-sm">
-                    Total: {instructorStudents.length}
+                  <div className="bg-white px-3 py-1.5 rounded-xl border border-purple-200 text-xs sm:text-sm font-bold text-purple-700 shadow-sm">
+                    📊 Total: {instructorStudents.length}
                   </div>
-                  <div className="bg-green-100 px-3 py-1.5 rounded-xl border border-green-300 text-sm font-bold text-green-800 shadow-sm">
-                    Visited: {visitedCount} / {instructorStudents.length}
+                  <div className="bg-green-100 px-3 py-1.5 rounded-xl border border-green-300 text-xs sm:text-sm font-bold text-green-800 shadow-sm">
+                    🟢 Visited: {visitedCount} ({instructorStudents.length > 0 ? Math.round((visitedCount / instructorStudents.length) * 100) : 0}%)
+                  </div>
+                  <div className="bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-300 text-xs sm:text-sm font-bold text-amber-800 shadow-sm">
+                    🟡 Pending: {instructorStudents.length - visitedCount}
                   </div>
                 </div>
               </div>
@@ -557,9 +599,9 @@ const Verify = () => {
               </p>
             ) : (
               <div className="space-y-4">
-                {/* Controls Bar: Select All + Save Changes (Top) */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-gray-50 rounded-2xl border border-gray-200 no-print">
-                  <div className="flex items-center gap-3">
+                {/* Controls Bar: Select All + Inline Search + Save Changes */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3 bg-gray-50 rounded-2xl border border-gray-200 no-print">
+                  <div className="flex flex-wrap items-center gap-3">
                     <label className="flex items-center gap-2 cursor-pointer select-none font-semibold text-sm text-gray-800">
                       <input
                         type="checkbox"
@@ -572,6 +614,27 @@ const Verify = () => {
                     <span className="text-xs text-gray-500">
                       ({visitedCount} of {instructorStudents.length} marked)
                     </span>
+                  </div>
+
+                  {/* Quick Inline Student Search Filter */}
+                  <div className="relative w-full md:w-auto">
+                    <input
+                      type="text"
+                      value={studentSearchQuery}
+                      onChange={(e) => setStudentSearchQuery(e.target.value)}
+                      placeholder="Filter student or serial..."
+                      className="w-full md:w-64 pl-8 pr-7 py-2 text-xs border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                    />
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs">🔍</span>
+                    {studentSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setStudentSearchQuery("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 font-bold text-xs"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
 
                   <button
@@ -625,7 +688,7 @@ const Verify = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {instructorStudents.map((student, idx) => {
+                      {displayedStudents.map((student, idx) => {
                         const isVisited = !!visitedMap[student.id];
                         return (
                           <tr
@@ -656,13 +719,13 @@ const Verify = () => {
                               {idx + 1}
                             </td>
 
-                            <td className="px-4 py-3 font-bold text-purple-700">
-                              {student.serialNumber || "—"}
+                            <td className="px-4 py-3 font-bold text-purple-700 font-mono">
+                              {highlightText(student.serialNumber || "—", studentSearchQuery)}
                             </td>
 
                             <td className="px-4 py-3 font-semibold text-gray-900">
                               <div className="flex items-center gap-2">
-                                <span>{student.name}</span>
+                                <span>{highlightText(student.name, studentSearchQuery)}</span>
                                 {isVisited && (
                                   <span className="text-xs bg-green-200 text-green-800 font-bold px-1.5 py-0.5 rounded no-print">
                                     Visited
@@ -681,12 +744,16 @@ const Verify = () => {
                             <td className="px-3 py-3">
                               <span
                                 className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                                  student.paymentStatus === "success"
+                                  ["success", "paid", "verified"].includes(String(student.paymentStatus || "").toLowerCase()) ||
+                                  student.registrationStatus === "CONFIRMED"
                                     ? "bg-green-100 text-green-700"
                                     : "bg-yellow-100 text-yellow-700"
                                 }`}
                               >
-                                {student.paymentStatus === "success" ? "Paid" : "Pending"}
+                                {["success", "paid", "verified"].includes(String(student.paymentStatus || "").toLowerCase()) ||
+                                student.registrationStatus === "CONFIRMED"
+                                  ? "Paid"
+                                  : "Pending"}
                               </span>
                             </td>
                           </tr>
@@ -720,6 +787,30 @@ const Verify = () => {
                     {savingVisited ? "Saving to Database..." : "Save Changes"}
                   </button>
                 </div>
+
+                {/* Floating Sticky Save Bar (Fixed at bottom right for easy access while scrolling) */}
+                {hasVisitedChanges && (
+                  <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-8 z-40 bg-white/95 backdrop-blur-md border-2 border-purple-400 shadow-2xl rounded-2xl p-3 sm:px-5 sm:py-3 flex items-center justify-between sm:justify-start gap-4 transition-all no-print animate-bounce-subtle">
+                    <div className="text-left">
+                      <span className="text-[11px] text-orange-600 font-bold uppercase tracking-wider block">Unsaved Changes</span>
+                      <span className="text-sm font-extrabold text-gray-800">
+                        <span className="text-green-700">{visitedCount}</span> / {instructorStudents.length} Visited
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={saveVisitedChanges}
+                      disabled={savingVisited}
+                      className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 hover:from-purple-700 hover:to-orange-600 text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-50 text-sm flex items-center gap-1.5"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span>{savingVisited ? "Saving..." : "Save Changes"}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )
           ) : (
@@ -815,12 +906,16 @@ const Verify = () => {
                   <span className="font-semibold text-gray-500 block text-xs">Payment</span>
                   <span
                     className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${
-                      participant.paymentStatus === "success"
+                      ["success", "paid", "verified"].includes(String(participant.paymentStatus || "").toLowerCase()) ||
+                      participant.registrationStatus === "CONFIRMED"
                         ? "bg-green-100 text-green-700"
                         : "bg-yellow-100 text-yellow-700"
                     }`}
                   >
-                    {participant.paymentStatus || "pending"}
+                    {["success", "paid", "verified"].includes(String(participant.paymentStatus || "").toLowerCase()) ||
+                    participant.registrationStatus === "CONFIRMED"
+                      ? "Paid"
+                      : "Pending"}
                   </span>
                 </div>
                 <div>

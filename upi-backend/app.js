@@ -302,8 +302,17 @@ const createApp = ({
       registrationId: participantIds[index],
       name: participant.name,
       institution: participant.institution,
+      instructor: participant.instructor,
       email: participant.email,
       phone: participant.instructorPhone,
+      instructorPhone: participant.instructorPhone,
+      event: participant.event,
+      category: participant.category,
+      level: participant.level,
+      gender: participant.gender || "",
+      class: participant.class || "",
+      dob: participant.dob || "",
+      age: participant.age,
     }));
     let paymentReference = null;
     for (let attempt = 0; attempt < 20 && !paymentReference; attempt += 1) {
@@ -615,12 +624,33 @@ const createApp = ({
       const snapshot = await db.collection("upiPayments").limit(500).get();
       let payments = snapshot.docs.map((document) => {
         const payment = document.data();
+        const drafts = payment.participantDrafts || [];
+        const serials = payment.serialNumbers || [];
+        const enrichedSummary = (payment.participantSummary || []).map((p, idx) => {
+          const draft = drafts[idx] || drafts.find((d) => d.registrationId === p.registrationId) || {};
+          const serialObj = serials.find((s) => s.registrationId === p.registrationId);
+          return {
+            ...draft,
+            ...p,
+            instructor: p.instructor || draft.instructor || "",
+            instructorPhone: p.phone || p.instructorPhone || draft.instructorPhone || "",
+            institution: p.institution || draft.institution || "",
+            event: p.event || draft.event || "",
+            category: p.category || draft.category || "",
+            level: p.level || draft.level || "",
+            gender: p.gender || draft.gender || "",
+            class: p.class || draft.class || "",
+            dob: p.dob || draft.dob || "",
+            age: p.age ?? draft.age ?? "",
+            serialNumber: p.serialNumber || (serialObj ? serialObj.serialNumber : null),
+          };
+        });
         return {
           id: document.id,
           paymentReference: payment.paymentReference || null,
           registrationId: payment.registrationId,
           participantIds: payment.participantIds || [],
-          participantSummary: payment.participantSummary || [],
+          participantSummary: enrichedSummary,
           participantCount: payment.participantCount || 1,
           amountPaise: payment.amountPaise,
           expectedAmountPaise: payment.expectedAmountPaise,
@@ -824,20 +854,40 @@ const createApp = ({
             }));
 
         let serialNumbers = payment.serialNumbers || [];
-        let counterValue = null;
         let counterRef = null;
+        let finalCounters = null;
         if (nextStatus === "VERIFIED") {
           if (!env.CHECKIN_TOKEN_SECRET) throw new ApiError(503, "Check-in token configuration is missing.");
           const year = new Date().getFullYear();
           counterRef = db.collection("serialCounters").doc(String(year));
           const counterSnap = await transaction.get(counterRef);
-          counterValue = counterSnap.exists ? Number(counterSnap.data().value) || 0 : 0;
+          const counterData = counterSnap.exists ? counterSnap.data() : {};
+          finalCounters = {
+            DT: Number(counterData.DT) || Number(counterData.value) || 0,
+            ST: Number(counterData.ST) || 0,
+            NT: Number(counterData.NT) || 0,
+            SI: Number(counterData.SI) || 0,
+          };
+
           serialNumbers = participantRefs.map((participantRef, index) => {
             const draft = draftParticipants[index] || {};
-            counterValue += 1;
+            const eventVal = String(draft.event || draft.level || "district").toLowerCase();
+            let eventCode = "DT";
+            if (eventVal.includes("state") || eventVal === "st") {
+              eventCode = "ST";
+            } else if (eventVal.includes("nat") || eventVal === "nt") {
+              eventCode = "NT";
+            } else if (eventVal.includes("south") || eventVal === "si") {
+              eventCode = "SI";
+            }
+
+            finalCounters[eventCode] = (finalCounters[eventCode] || 0) + 1;
+            const seqStr = String(finalCounters[eventCode]).padStart(3, "0");
+            const serialNumber = `${year}-${eventCode}-${seqStr}`;
+
             return {
               registrationId: participantRef.id,
-              serialNumber: `COMP-${year}-${String(counterValue).padStart(3, "0")}`,
+              serialNumber,
               participant: draft,
             };
           });
@@ -899,7 +949,7 @@ const createApp = ({
             ...(serialEntry ? { serialNumber: serialEntry.serialNumber } : {}),
           });
         });
-        if (counterRef) transaction.set(counterRef, { value: counterValue, updatedAt: now });
+        if (counterRef && finalCounters) transaction.set(counterRef, { ...finalCounters, updatedAt: now }, { merge: true });
         if (claimRef && nextStatus === "VERIFIED") {
           transaction.update(claimRef, { claimStatus: "VERIFIED", verifiedAt: now });
         }

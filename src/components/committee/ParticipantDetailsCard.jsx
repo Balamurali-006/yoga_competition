@@ -11,7 +11,7 @@ const ParticipantDetailsCard = ({ data }) => {
       <p><strong>Institution:</strong> {data.institution}</p>
 
       <div style={styles.status}>
-        {data.paymentStatus === "success" ? (
+        {["success", "paid", "verified"].includes(String(data.paymentStatus || "").toLowerCase()) || data.registrationStatus === "CONFIRMED" ? (
           <span style={styles.allowed}>✔ Allowed</span>
         ) : (
           <span style={styles.denied}>✖ Not Allowed</span>

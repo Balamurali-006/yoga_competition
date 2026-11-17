@@ -8,6 +8,7 @@ import { getPrizeForScore } from "../utils/prize";
 const Validation = ({ user }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
 
@@ -116,41 +117,54 @@ const Validation = ({ user }) => {
     });
   }, [participants, savedScoresMap]);
 
-  // Extract unique instructors
+  // Only students marked visited by the committee are eligible for evaluation
+  const visitedParticipants = useMemo(() => {
+    return participants.filter((p) => p.visited === true);
+  }, [participants]);
+
+  // Extract unique instructors from visited participants (with fallback if none visited yet)
   const instructors = useMemo(() => {
+    const source = visitedParticipants.length > 0 ? visitedParticipants : participants;
     const set = new Set();
-    participants.forEach((p) => {
+    source.forEach((p) => {
       if (p.instructor && typeof p.instructor === "string" && p.instructor.trim()) {
         set.add(p.instructor.trim());
       }
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [participants]);
+  }, [visitedParticipants, participants]);
 
-  // Extract unique institutions / schools
+  // Extract unique institutions / schools from visited participants
   const institutions = useMemo(() => {
+    const source = visitedParticipants.length > 0 ? visitedParticipants : participants;
     const set = new Set();
-    participants.forEach((p) => {
+    source.forEach((p) => {
       const inst = p.institution || p.school;
       if (inst && typeof inst === "string" && inst.trim()) {
         set.add(inst.trim());
       }
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [participants]);
+  }, [visitedParticipants, participants]);
 
-  // Extract unique classes from database participants
+  // Extract unique classes from visited participants
   const classes = useMemo(() => {
+    const source = visitedParticipants.length > 0 ? visitedParticipants : participants;
     const set = new Set();
-    participants.forEach((p) => {
+    source.forEach((p) => {
       if (p.class && typeof p.class === "string" && p.class.trim()) set.add(p.class.trim());
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [participants]);
+  }, [visitedParticipants, participants]);
 
   // Filter students by selected instructor, institution, and class
+  // ONLY students who are visited can be evaluated and shown on the scoresheet
   const filteredStudents = useMemo(() => {
     return participants.filter((p) => {
+      // Evaluation is only permitted for participants who are marked as visited
+      if (!p.visited) {
+        return false;
+      }
       if (
         selectedInstructor &&
         (p.instructor || "").trim().toLowerCase() !== selectedInstructor.trim().toLowerCase()
@@ -260,6 +274,16 @@ const Validation = ({ user }) => {
   // Save scores for a specific student to 'scores' collection and update participant
   const saveStudentScore = async (student) => {
     const studentId = student.id;
+
+    // Guard: Only visited students can be evaluated
+    if (!student.visited) {
+      setSaveStatusMap((prev) => ({
+        ...prev,
+        [studentId]: { error: "Evaluation can only be done for visited students. Student must be marked visited by committee first." },
+      }));
+      return;
+    }
+
     const scores = scoreInputs[studentId] || {};
 
     const s1 = scores.asana1 !== "" ? Number(scores.asana1) : null;
@@ -368,15 +392,25 @@ const Validation = ({ user }) => {
 
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700">Password</label>
-              <input
-                name="password"
-                type="password"
-                value={loginForm.password}
-                onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                className="w-full rounded-xl border border-gray-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                placeholder="••••••••"
-                required
-              />
+              <div className="relative">
+                <input
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  value={loginForm.password}
+                  onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                  className="w-full rounded-xl border border-gray-300 pl-4 pr-11 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="••••••••"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 text-sm select-none"
+                  title={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? "👁️‍🗨️" : "👁️"}
+                </button>
+              </div>
             </div>
 
             {loginError && (
@@ -511,8 +545,11 @@ const Validation = ({ user }) => {
 
           {/* Filter Status Badge */}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-gray-100">
-            <div className="text-sm text-gray-600 font-medium">
-              Showing <span className="font-bold text-purple-700">{filteredStudents.length}</span> students matching filters
+            <div className="text-sm text-gray-600 font-medium flex flex-wrap items-center gap-2">
+              <span>Showing <span className="font-bold text-green-700">{filteredStudents.length}</span> visited students eligible for evaluation</span>
+              <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2.5 py-0.5 rounded-full font-semibold">
+                ✓ Visited Only
+              </span>
               {selectedInstructor && <span> · Instructor: <strong className="text-gray-800">{selectedInstructor}</strong></span>}
               {selectedInstitution && <span> · Institution: <strong className="text-gray-800">{selectedInstitution}</strong></span>}
               {selectedClass && <span> · Class: <strong className="text-gray-800">{selectedClass}</strong></span>}
@@ -544,11 +581,11 @@ const Validation = ({ user }) => {
           ) : filteredStudents.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-3xl shadow-xl p-8 border border-purple-100">
               <span className="text-4xl block mb-2">🧘</span>
-              <p className="text-gray-600 font-semibold text-lg">
-                No students found for the selected class.
+              <p className="text-gray-700 font-semibold text-lg">
+                No visited students found matching the selected filters.
               </p>
-              <p className="text-gray-500 text-sm mt-1">
-                Try selecting a different filter option or clear the filters above.
+              <p className="text-gray-500 text-sm mt-1 max-w-lg mx-auto">
+                Evaluation can only be done for students who have arrived and been marked as <strong>"Visited"</strong> by the committee in attendance verification.
               </p>
             </div>
           ) : (
