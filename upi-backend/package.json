@@ -5,6 +5,7 @@
   "description": "Manual UPI payment submission, verification, serial assignment, and check-in API",
   "main": "server.js",
   "scripts": {
+    "build": "npm install",
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test"
