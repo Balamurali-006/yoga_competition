@@ -2,7 +2,7 @@ const cors = require("cors");
 const crypto = require("crypto");
 const express = require("express");
 const multer = require("multer");
-const { sendEmail: sendEmailWithGmail } = require("./email");
+const { sendEmail: sendEmailWithBrevo } = require("./email");
 const {
   PAYMENT_STATUSES,
   amountToPaise,
@@ -117,7 +117,7 @@ const createApp = ({
   admin,
   storage,
   env = process.env,
-  sendEmail = sendEmailWithGmail,
+  sendEmail = sendEmailWithBrevo,
   generatePaymentReference = () => crypto.randomInt(100000, 1000000),
 }) => {
   const app = express();
@@ -150,24 +150,23 @@ const createApp = ({
   const publicLimiter = makeRateLimiter({ windowMs, max: maxRequests });
   const submitLimiter = makeRateLimiter({ windowMs, max: Math.min(maxRequests, 8) });
   const verificationLimiter = makeRateLimiter({ windowMs, max: Math.max(5, maxRequests) });
+  const emailConfigured = Boolean(env.BREVO_API_KEY && env.EMAIL_FROM);
 
   const deliverEmail = async ({ to, subject, text }, failureMessage) => {
-    if (!env.SMTP_USER || !env.SMTP_APP_PASSWORD) {
-      throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
+    if (!emailConfigured) {
+      throw new ApiError(503, "Brevo email is not configured. Set BREVO_API_KEY and EMAIL_FROM.");
     }
 
     try {
       await sendEmail({
-        from: env.EMAIL_FROM || env.SMTP_USER,
+        from: env.EMAIL_FROM,
+        fromName: env.EMAIL_FROM_NAME || "Ekadhma Yoga Association",
+        replyTo: env.EMAIL_REPLY_TO || undefined,
         to,
         subject,
         text,
       }, {
-        host: env.SMTP_HOST || "smtp.gmail.com",
-        port: Number(env.SMTP_PORT) || 465,
-        secure: String(env.SMTP_SECURE || "true").toLowerCase() !== "false",
-        user: env.SMTP_USER,
-        pass: env.SMTP_APP_PASSWORD,
+        apiKey: env.BREVO_API_KEY,
       });
     } catch (error) {
       console.error("Email notification delivery failed:", error.message);
@@ -539,8 +538,8 @@ const createApp = ({
       let screenshotFile = null;
       let submissionCommitted = false;
       try {
-        if (!env.SMTP_USER || !env.SMTP_APP_PASSWORD) {
-          throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
+        if (!emailConfigured) {
+          throw new ApiError(503, "Brevo email is not configured. Set BREVO_API_KEY and EMAIL_FROM.");
         }
 
         const utr = normalizeUtr(req.body.utr);
@@ -858,8 +857,8 @@ const createApp = ({
       if (nextStatus === "REJECTED" && !reason) {
         throw new ApiError(400, "A rejection reason is required.");
       }
-      if (nextStatus === "VERIFIED" && (!env.SMTP_USER || !env.SMTP_APP_PASSWORD)) {
-        throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
+      if (nextStatus === "VERIFIED" && !emailConfigured) {
+        throw new ApiError(503, "Brevo email is not configured. Set BREVO_API_KEY and EMAIL_FROM.");
       }
 
       const paymentRef = db.collection("upiPayments").doc(req.params.paymentId);

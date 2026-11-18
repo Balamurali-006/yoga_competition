@@ -373,9 +373,8 @@ test("payment submissions email only the admin and same-UTR retry resends a fail
   let shouldFail = true;
   const emailMessages = [];
   const baseUrl = await startTestServer(t, {
-    SMTP_USER: "ekadhmayogaassociation@gmail.com",
-    SMTP_APP_PASSWORD: "test-app-password",
-    EMAIL_FROM: "Ekadhma <notifications@example.com>",
+    BREVO_API_KEY: "test-brevo-api-key",
+    EMAIL_FROM: "notifications@example.com",
     ADMIN_NOTIFICATION_EMAIL: "ekadhmayogaassociation@gmail.com",
   }, {
     db,
@@ -444,9 +443,8 @@ test("admin approval emails assigned serial numbers to the registration contact"
   const emailMessages = [];
   let shouldFail = true;
   const baseUrl = await startTestServer(t, {
-    SMTP_USER: "ekadhmayogaassociation@gmail.com",
-    SMTP_APP_PASSWORD: "test-app-password",
-    EMAIL_FROM: "Ekadhma <notifications@example.com>",
+    BREVO_API_KEY: "test-brevo-api-key",
+    EMAIL_FROM: "notifications@example.com",
     CHECKIN_TOKEN_SECRET: "test-checkin-secret",
   }, {
     db,
@@ -499,9 +497,8 @@ test("admin can retry a missing notification for an already-submitted payment", 
   });
   const emailMessages = [];
   const baseUrl = await startTestServer(t, {
-    SMTP_USER: "ekadhmayogaassociation@gmail.com",
-    SMTP_APP_PASSWORD: "test-app-password",
-    EMAIL_FROM: "Ekadhma <notifications@example.com>",
+    BREVO_API_KEY: "test-brevo-api-key",
+    EMAIL_FROM: "notifications@example.com",
     ADMIN_NOTIFICATION_EMAIL: "ekadhmayogaassociation@gmail.com",
   }, {
     db,

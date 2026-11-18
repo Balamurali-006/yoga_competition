@@ -1,23 +1,35 @@
-const nodemailer = require("nodemailer");
+const BREVO_EMAILS_URL = "https://api.brevo.com/v3/smtp/email";
 
 const sendEmail = async (
-  { from, to, subject, text },
-  { host, port, secure, user, pass },
-  { createTransport = (options) => nodemailer.createTransport(options) } = {}
+  { from, fromName, replyTo, to, subject, text },
+  { apiKey },
+  { fetchImpl = globalThis.fetch } = {}
 ) => {
-  if (!user || !pass) throw new Error("Gmail SMTP credentials are not configured.");
+  if (!apiKey) throw new Error("Brevo API key is not configured.");
+  if (!from) throw new Error("A verified Brevo sender email is not configured.");
+  if (typeof fetchImpl !== "function") throw new Error("The runtime does not provide fetch.");
 
-  const transporter = createTransport({
-    host: host || "smtp.gmail.com",
-    port: Number(port) || 465,
-    secure: secure !== false,
-    auth: { user, pass: pass.replace(/\s+/g, "") },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 15000,
+  const response = await fetchImpl(BREVO_EMAILS_URL, {
+    method: "POST",
+    headers: {
+      "api-key": apiKey,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      sender: { email: from, name: fromName },
+      to: (Array.isArray(to) ? to : [to]).map((email) => ({ email })),
+      subject,
+      textContent: text,
+      ...(replyTo ? { replyTo: { email: replyTo } } : {}),
+    }),
   });
+  const result = await response.json();
 
-  await transporter.sendMail({ from, to, subject, text });
+  if (!response.ok) {
+    const detail = result.message || result.code || `HTTP ${response.status}`;
+    throw new Error(`Brevo email request failed: ${detail}`);
+  }
 };
 
 module.exports = { sendEmail };
