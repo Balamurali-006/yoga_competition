@@ -1,6 +1,26 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { saveRegistrationAccess, upiApiRequest } from "../../firebase/upiApi";
+
+const INDIVIDUAL_DRAFT_KEY = "yoga_individual_registration_draft";
+
+const CURRENT_YEAR = new Date().getFullYear();
+const DOB_YEARS = Array.from({ length: 80 }, (_, i) => String(CURRENT_YEAR - i));
+const DOB_MONTHS = [
+  { value: "01", label: "Jan (01)" },
+  { value: "02", label: "Feb (02)" },
+  { value: "03", label: "Mar (03)" },
+  { value: "04", label: "Apr (04)" },
+  { value: "05", label: "May (05)" },
+  { value: "06", label: "Jun (06)" },
+  { value: "07", label: "Jul (07)" },
+  { value: "08", label: "Aug (08)" },
+  { value: "09", label: "Sep (09)" },
+  { value: "10", label: "Oct (10)" },
+  { value: "11", label: "Nov (11)" },
+  { value: "12", label: "Dec (12)" },
+];
+const DOB_DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
 
 const TEST_FORM_DATA = {
   name: "Aarav Kumar",
@@ -34,11 +54,27 @@ const emptyForm = {
 
 const RegistrationForm = () => {
   const [form, setForm] = useState(() => {
+    try {
+      const saved = localStorage.getItem(INDIVIDUAL_DRAFT_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) {
+          return { ...emptyForm, ...parsed };
+        }
+      }
+    } catch (_) {}
     if (process.env.NODE_ENV === "development") {
       return TEST_FORM_DATA;
     }
     return emptyForm;
   });
+
+  // Automatically keep draft updated in localStorage so navigation back restores it
+  useEffect(() => {
+    try {
+      localStorage.setItem(INDIVIDUAL_DRAFT_KEY, JSON.stringify(form));
+    } catch (_) {}
+  }, [form]);
 
   const [currentStep, setCurrentStep] = useState(1);
   const [errors, setErrors] = useState({});
@@ -52,9 +88,47 @@ const RegistrationForm = () => {
   };
 
   const clearForm = () => {
+    try {
+      localStorage.removeItem(INDIVIDUAL_DRAFT_KEY);
+    } catch (_) {}
     setForm(emptyForm);
     setErrors({});
     setCurrentStep(1);
+  };
+
+  const [dobYear, dobMonth, dobDay] = useMemo(() => {
+    if (form.dob && /^\d{4}-\d{2}-\d{2}$/.test(form.dob)) {
+      const parts = form.dob.split("-");
+      return [parts[0], parts[1], parts[2]];
+    }
+    return ["", "", ""];
+  }, [form.dob]);
+
+  const handleDobPartChange = (part, val) => {
+    let y = dobYear;
+    let m = dobMonth;
+    let d = dobDay;
+
+    if (part === "year") y = val;
+    if (part === "month") m = val;
+    if (part === "day") d = val;
+
+    if (y && m && d) {
+      const fullDob = `${y}-${m}-${d}`;
+      const today = new Date();
+      const birthDate = new Date(`${y}-${m}-${d}`);
+      if (!Number.isNaN(birthDate.getTime())) {
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const monthDiff = today.getMonth() - birthDate.getMonth();
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+          age--;
+        }
+        setForm((prev) => ({ ...prev, dob: fullDob, age: Math.max(0, age).toString() }));
+        if (errors.dob) setErrors((prev) => ({ ...prev, dob: "" }));
+        return;
+      }
+    }
+    setForm((prev) => ({ ...prev, dob: y && m && d ? `${y}-${m}-${d}` : "" }));
   };
 
   const handleChange = (e) => {
@@ -334,16 +408,69 @@ const RegistrationForm = () => {
 
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    Date of Birth <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    name="dob"
-                    value={form.dob}
-                    onChange={handleChange}
-                    className={inputClass("dob")}
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-semibold text-gray-700">
+                      Date of Birth <span className="text-red-500">*</span>
+                    </label>
+                    <span className="text-xs font-medium text-purple-600">Day / Month / Year</span>
+                  </div>
+
+                  {/* Smooth Day / Month / Year Dropdowns for easy scrolling */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <select
+                      value={dobDay}
+                      onChange={(e) => handleDobPartChange("day", e.target.value)}
+                      className={`px-2 py-2.5 rounded-lg border-2 text-sm font-medium bg-white transition-all cursor-pointer ${
+                        errors.dob ? "border-red-400 bg-red-50" : "border-gray-200 focus:border-purple-500"
+                      }`}
+                    >
+                      <option value="">Day</option>
+                      {DOB_DAYS.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={dobMonth}
+                      onChange={(e) => handleDobPartChange("month", e.target.value)}
+                      className={`px-2 py-2.5 rounded-lg border-2 text-sm font-medium bg-white transition-all cursor-pointer ${
+                        errors.dob ? "border-red-400 bg-red-50" : "border-gray-200 focus:border-purple-500"
+                      }`}
+                    >
+                      <option value="">Month</option>
+                      {DOB_MONTHS.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={dobYear}
+                      onChange={(e) => handleDobPartChange("year", e.target.value)}
+                      className={`px-2 py-2.5 rounded-lg border-2 text-sm font-medium bg-white transition-all cursor-pointer ${
+                        errors.dob ? "border-red-400 bg-red-50" : "border-gray-200 focus:border-purple-500"
+                      }`}
+                    >
+                      <option value="">Year</option>
+                      {DOB_YEARS.map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Smooth calendar picker with max & min bounds */}
+                  <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                    <span>Or pick date from calendar:</span>
+                    <input
+                      type="date"
+                      name="dob"
+                      value={/^\d{4}-\d{2}-\d{2}$/.test(form.dob) ? form.dob : ""}
+                      max={new Date().toISOString().split("T")[0]}
+                      min="1940-01-01"
+                      onChange={handleChange}
+                      className="px-2 py-1 rounded border border-gray-300 text-gray-700 bg-gray-50 hover:bg-white focus:border-purple-500 outline-none cursor-pointer text-xs"
+                    />
+                  </div>
+
                   {errors.dob && (
                     <p className="mt-1 text-xs text-red-600 font-medium">⚠️ {errors.dob}</p>
                   )}

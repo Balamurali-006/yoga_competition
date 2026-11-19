@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import {
   getRegistrationAccess,
@@ -19,6 +19,7 @@ const statusMessage = {
 const formatRupees = (paise) => `₹${(Number(paise || 0) / 100).toFixed(2)}`;
 
 const UpiPaymentPage = () => {
+  const navigate = useNavigate();
   const { paymentId, pid } = useParams();
   const paymentGroupId = paymentId || pid;
   const accessToken = getRegistrationAccess(paymentGroupId);
@@ -28,7 +29,6 @@ const UpiPaymentPage = () => {
   const [amount, setAmount] = useState("");
   const [paymentDateTime, setPaymentDateTime] = useState("");
   const [upiApp, setUpiApp] = useState("");
-  const [screenshot, setScreenshot] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -100,14 +100,12 @@ const UpiPaymentPage = () => {
             formData.append("amount", amount);
             formData.append("paymentDateTime", localPaymentDate.toISOString());
             formData.append("upiApp", upiApp);
-            if (screenshot) formData.append("screenshot", screenshot);
             return formData;
           })(),
         }
       );
       setNotice("Payment details received. They will remain unverified until an admin checks the bank transaction.");
       setUtr("");
-      setScreenshot(null);
       await loadRegistration();
     } catch (submitError) {
       setError(submitError.message);
@@ -133,6 +131,24 @@ const UpiPaymentPage = () => {
     <main className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-orange-50 px-4 py-10">
       <div className="mx-auto max-w-3xl space-y-6">
         <section className="rounded-3xl bg-white p-6 shadow-xl md:p-8">
+          {(!registration || registration.paymentStatus === "PENDING") && (
+            <div className="mb-4">
+              <button
+                type="button"
+                onClick={() => {
+                  if (registration?.participantCount > 1) {
+                    navigate("/school-registration");
+                  } else {
+                    navigate("/register");
+                  }
+                }}
+                className="inline-flex items-center gap-2 text-sm font-semibold text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-3.5 py-1.5 rounded-xl transition-all shadow-sm"
+              >
+                <span>←</span>
+                <span>Back to registration (add/edit participants)</span>
+              </button>
+            </div>
+          )}
           <div className="text-center">
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-600 to-orange-500 text-3xl text-white">₹</div>
             <h1 className="text-3xl font-bold text-purple-700">Registration Payment</h1>
@@ -253,11 +269,6 @@ const UpiPaymentPage = () => {
                 <label className="block text-sm font-medium text-gray-700">
                   UPI app (optional)
                   <input value={upiApp} onChange={(event) => setUpiApp(event.target.value)} maxLength="80" placeholder="For example, BHIM or your bank app" className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5" />
-                </label>
-                <label className="block text-sm font-medium text-gray-700">
-                  Payment screenshot (optional, reference only)
-                  <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setScreenshot(event.target.files?.[0] || null)} className="mt-1 block w-full text-sm" />
-                  <span className="mt-1 block text-xs text-gray-500">PNG, JPEG, or WebP; maximum 3 MB. A screenshot does not prove payment.</span>
                 </label>
                 <p className="text-xs text-gray-500">Submitting these details does not verify payment. An administrator will compare them with trusted bank transaction records.</p>
                 <button disabled={submitting} className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-orange-500 px-4 py-3 font-semibold text-white disabled:opacity-60">

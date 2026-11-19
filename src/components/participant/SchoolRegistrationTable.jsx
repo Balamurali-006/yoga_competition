@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { saveRegistrationAccess, upiApiRequest } from "../../firebase/upiApi";
+
+const SCHOOL_DRAFT_KEY = "yoga_school_registration_draft";
 
 const emptyStudent = () => ({
   name: "",
@@ -44,23 +46,49 @@ const inputClass =
 
 const SchoolRegistrationTable = () => {
   const navigate = useNavigate();
-  const [students, setStudents] = useState(() =>
-    process.env.NODE_ENV === "development" ? buildDemoStudents() : [emptyStudent()]
-  );
+
+  const getSavedDraft = () => {
+    try {
+      const saved = localStorage.getItem(SCHOOL_DRAFT_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return null;
+  };
+  const draft = getSavedDraft();
+
+  const [students, setStudents] = useState(() => {
+    if (draft && Array.isArray(draft.students) && draft.students.length > 0) {
+      return draft.students;
+    }
+    return process.env.NODE_ENV === "development" ? buildDemoStudents() : [emptyStudent()];
+  });
   const [institution, setInstitution] = useState(
-    process.env.NODE_ENV === "development" ? "Green Valley Academy" : ""
+    draft?.institution !== undefined ? draft.institution : (process.env.NODE_ENV === "development" ? "Green Valley Academy" : "")
   );
   const [instructor, setInstructor] = useState(
-    process.env.NODE_ENV === "development" ? "Ravi Sharma" : ""
+    draft?.instructor !== undefined ? draft.instructor : (process.env.NODE_ENV === "development" ? "Ravi Sharma" : "")
   );
   const [instructorPhone, setInstructorPhone] = useState(
-    process.env.NODE_ENV === "development" ? "9876543210" : ""
+    draft?.instructorPhone !== undefined ? draft.instructorPhone : (process.env.NODE_ENV === "development" ? "9876543210" : "")
   );
   const [email, setEmail] = useState(
-    process.env.NODE_ENV === "development" ? "school.test@example.com" : ""
+    draft?.email !== undefined ? draft.email : (process.env.NODE_ENV === "development" ? "school.test@example.com" : "")
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Automatically keep draft in localStorage so navigating back from payment restores all rows
+  useEffect(() => {
+    try {
+      localStorage.setItem(SCHOOL_DRAFT_KEY, JSON.stringify({
+        students,
+        institution,
+        instructor,
+        instructorPhone,
+        email,
+      }));
+    } catch (_) {}
+  }, [students, institution, instructor, instructorPhone, email]);
 
   const fillDemoData = () => {
     setStudents(buildDemoStudents());
@@ -72,6 +100,9 @@ const SchoolRegistrationTable = () => {
   };
 
   const clearForm = () => {
+    try {
+      localStorage.removeItem(SCHOOL_DRAFT_KEY);
+    } catch (_) {}
     setStudents([emptyStudent()]);
     setInstitution("");
     setInstructor("");
