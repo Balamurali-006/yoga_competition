@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import {
   getRegistrationAccess,
@@ -20,6 +20,7 @@ const formatRupees = (paise) => `₹${(Number(paise || 0) / 100).toFixed(2)}`;
 
 const UpiPaymentPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { paymentId, pid } = useParams();
   const paymentGroupId = paymentId || pid;
   const accessToken = getRegistrationAccess(paymentGroupId);
@@ -123,6 +124,37 @@ const UpiPaymentPage = () => {
     }
   };
 
+  const isSchoolEntry = useMemo(() => {
+    // 1. Navigation state from previous page
+    if (location.state?.entryType === "school") return true;
+    if (location.state?.entryType === "individual") return false;
+
+    // 2. Session storage tag saved during registration submission
+    const stored = sessionStorage.getItem("payment_entry_type_" + paymentGroupId);
+    if (stored === "school") return true;
+    if (stored === "individual") return false;
+
+    // 3. Backend registration data
+    if (registration?.entryType === "school") return true;
+    if (registration?.entryType === "individual") return false;
+    if (registration?.participantCount > 1) return true;
+
+    // 4. Draft comparison fallback
+    try {
+      const schoolDraft = localStorage.getItem("yoga_school_registration_draft");
+      if (schoolDraft) {
+        const parsed = JSON.parse(schoolDraft);
+        if (Array.isArray(parsed?.students) && parsed.students.length > 0) {
+          if (parsed.students.some((s) => s.name && registration?.participants?.some((p) => p.name === s.name))) {
+            return true;
+          }
+        }
+      }
+    } catch (_) {}
+
+    return false;
+  }, [location.state, paymentGroupId, registration]);
+
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center bg-purple-50 text-gray-700">Loading registration payment...</div>;
   }
@@ -136,7 +168,7 @@ const UpiPaymentPage = () => {
               <button
                 type="button"
                 onClick={() => {
-                  if (registration?.participantCount > 1) {
+                  if (isSchoolEntry) {
                     navigate("/school-registration");
                   } else {
                     navigate("/register");
@@ -145,7 +177,11 @@ const UpiPaymentPage = () => {
                 className="inline-flex items-center gap-2 text-sm font-semibold text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-3.5 py-1.5 rounded-xl transition-all shadow-sm"
               >
                 <span>←</span>
-                <span>Back to registration (add/edit participants)</span>
+                <span>
+                  {isSchoolEntry
+                    ? "Back to School Registration (add/edit participants)"
+                    : "Back to Individual Registration (edit details)"}
+                </span>
               </button>
             </div>
           )}

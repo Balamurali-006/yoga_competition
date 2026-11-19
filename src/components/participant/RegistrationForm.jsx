@@ -234,7 +234,10 @@ const RegistrationForm = () => {
         }),
       });
       saveRegistrationAccess(registration.paymentGroupId, registration.accessToken);
-      navigate(`/upi-payment/${registration.paymentGroupId}`);
+      try {
+        sessionStorage.setItem("payment_entry_type_" + registration.paymentGroupId, "individual");
+      } catch (_) {}
+      navigate(`/upi-payment/${registration.paymentGroupId}`, { state: { entryType: "individual" } });
     } catch (error) {
       console.error("Registration submission failed:", error);
       setSubmissionError(error.message || "Could not save participant details.");

@@ -170,7 +170,10 @@ const SchoolRegistrationTable = () => {
         }),
       });
       saveRegistrationAccess(registration.paymentGroupId, registration.accessToken);
-      navigate(`/upi-payment/${registration.paymentGroupId}`);
+      try {
+        sessionStorage.setItem("payment_entry_type_" + registration.paymentGroupId, "school");
+      } catch (_) {}
+      navigate(`/upi-payment/${registration.paymentGroupId}`, { state: { entryType: "school" } });
     } catch (submitError) {
       console.error("Group registration failed:", submitError);
       setError(submitError.message || "Could not save group registrations.");

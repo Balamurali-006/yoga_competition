@@ -388,7 +388,7 @@ const createApp = ({
     }
   });
 
-  const createRegistrations = async (participants, feePaise, groupId) => {
+  const createRegistrations = async (participants, feePaise, groupId, entryType = "individual") => {
     if (!Array.isArray(participants) || participants.length < 1 || participants.length > 100) {
       throw new ApiError(400, "Submit between 1 and 100 participants.");
     }
@@ -456,6 +456,7 @@ const createApp = ({
           participantSummary,
           participantDrafts: draftParticipants,
           participantCount: participantIds.length,
+          entryType,
           paymentReference: candidate,
           amountPaise: feePaise * participantIds.length,
           expectedAmountPaise: feePaise * participantIds.length,
@@ -502,6 +503,7 @@ const createApp = ({
       participantCount: participantIds.length,
       amountPaise: feePaise * participantIds.length,
       accessToken,
+      entryType,
     };
   };
 
@@ -509,7 +511,9 @@ const createApp = ({
     try {
       const registration = await createRegistrations(
         [req.body],
-        req.registrationFeePaise
+        req.registrationFeePaise,
+        null,
+        "individual"
       );
       return res.status(201).json(registration);
     } catch (error) {
@@ -521,7 +525,9 @@ const createApp = ({
     try {
       const registration = await createRegistrations(
         req.body.participants,
-        req.registrationFeePaise
+        req.registrationFeePaise,
+        null,
+        "school"
       );
       return res.status(201).json(registration);
     } catch (error) {
@@ -700,6 +706,7 @@ const createApp = ({
           paymentReference: payment.paymentReference || null,
           registrationId: payment.registrationId,
           participantCount: payment.participantCount,
+          entryType: payment.entryType || (payment.participantCount > 1 ? "school" : "individual"),
           amountPaise: payment.expectedAmountPaise,
           paymentStatus: payment.paymentStatus,
           utr: payment.utr || null,
