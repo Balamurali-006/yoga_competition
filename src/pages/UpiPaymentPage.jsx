@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { useParams, useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import {
   getRegistrationAccess,
@@ -21,6 +21,7 @@ const formatRupees = (paise) => `₹${(Number(paise || 0) / 100).toFixed(2)}`;
 const UpiPaymentPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { paymentId, pid } = useParams();
   const paymentGroupId = paymentId || pid;
   const accessToken = getRegistrationAccess(paymentGroupId);
@@ -63,6 +64,17 @@ const UpiPaymentPage = () => {
       .catch((configLoadError) => setConfigError(configLoadError.message));
     loadRegistration();
   }, [loadRegistration]);
+
+  // When payment is done (submitted, under review, or verified), clear saved drafts so new registrations start fresh
+  useEffect(() => {
+    if (registration && ["SUBMITTED", "UNDER_REVIEW", "VERIFIED"].includes(registration.paymentStatus)) {
+      try {
+        localStorage.removeItem("yoga_individual_registration_draft");
+        localStorage.removeItem("yoga_school_registration_draft");
+        localStorage.removeItem("last_registration_type");
+      } catch (_) {}
+    }
+  }, [registration]);
 
   const upiLink = useMemo(() => {
     if (!config || !registration) return "";
@@ -107,6 +119,11 @@ const UpiPaymentPage = () => {
       );
       setNotice("Payment details received. They will remain unverified until an admin checks the bank transaction.");
       setUtr("");
+      try {
+        localStorage.removeItem("yoga_individual_registration_draft");
+        localStorage.removeItem("yoga_school_registration_draft");
+        localStorage.removeItem("last_registration_type");
+      } catch (_) {}
       await loadRegistration();
     } catch (submitError) {
       setError(submitError.message);
@@ -125,27 +142,37 @@ const UpiPaymentPage = () => {
   };
 
   const isSchoolEntry = useMemo(() => {
-    // 1. Navigation state from previous page
+    // 1. URL Query parameter ?type=school (highest priority, 100% persistent across reloads)
+    const queryType = searchParams.get("type");
+    if (queryType === "school") return true;
+    if (queryType === "individual") return false;
+
+    // 2. Navigation state from previous page
     if (location.state?.entryType === "school") return true;
     if (location.state?.entryType === "individual") return false;
 
-    // 2. Session storage tag saved during registration submission
+    // 3. Session storage tag saved during registration submission
     const stored = sessionStorage.getItem("payment_entry_type_" + paymentGroupId);
     if (stored === "school") return true;
     if (stored === "individual") return false;
 
-    // 3. Backend registration data
+    // 4. Backend registration data
     if (registration?.entryType === "school") return true;
     if (registration?.entryType === "individual") return false;
     if (registration?.participantCount > 1) return true;
 
-    // 4. Draft comparison fallback
+    // 5. Last registration type stored in localStorage
+    const lastType = localStorage.getItem("last_registration_type");
+    if (lastType === "school") return true;
+    if (lastType === "individual") return false;
+
+    // 6. Draft comparison fallback
     try {
       const schoolDraft = localStorage.getItem("yoga_school_registration_draft");
       if (schoolDraft) {
         const parsed = JSON.parse(schoolDraft);
         if (Array.isArray(parsed?.students) && parsed.students.length > 0) {
-          if (parsed.students.some((s) => s.name && registration?.participants?.some((p) => p.name === s.name))) {
+          if (parsed.students.some((s) => s.name && s.name.trim())) {
             return true;
           }
         }
@@ -153,7 +180,7 @@ const UpiPaymentPage = () => {
     } catch (_) {}
 
     return false;
-  }, [location.state, paymentGroupId, registration]);
+  }, [searchParams, location.state, paymentGroupId, registration]);
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center bg-purple-50 text-gray-700">Loading registration payment...</div>;
@@ -319,7 +346,29 @@ const UpiPaymentPage = () => {
               <h2 className="font-bold text-amber-900">Payment review in progress</h2>
               <p className="mt-1 text-sm text-amber-900">Submitted UTR: {registration.utr}</p>
               <p className="text-sm text-amber-900">Submitted at: {registration.submittedAt ? new Date(registration.submittedAt).toLocaleString() : "—"}</p>
-              <button type="button" onClick={loadRegistration} className="mt-3 rounded-lg border border-amber-400 px-3 py-2 text-sm font-semibold text-amber-900">Refresh status</button>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button type="button" onClick={loadRegistration} className="rounded-xl border border-amber-400 bg-white px-3.5 py-2 text-sm font-semibold text-amber-900 shadow-sm hover:bg-amber-100/50">
+                  🔄 Refresh status
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      localStorage.removeItem("yoga_individual_registration_draft");
+                      localStorage.removeItem("yoga_school_registration_draft");
+                      localStorage.removeItem("last_registration_type");
+                    } catch (_) {}
+                    if (isSchoolEntry) {
+                      navigate("/school-registration");
+                    } else {
+                      navigate("/register");
+                    }
+                  }}
+                  className="rounded-xl bg-gradient-to-r from-purple-600 to-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-95 transition-opacity"
+                >
+                  ➕ Register Another Participant
+                </button>
+              </div>
             </div>
           )}
 
@@ -335,9 +384,29 @@ const UpiPaymentPage = () => {
               <div className="rounded-2xl border border-green-200 bg-green-50 p-5 text-center text-green-800">
                 <h2 className="text-xl font-bold">Payment verified</h2>
                 <p className="mt-1">Your registration is confirmed. Save or print your ticket for event check-in.</p>
-                <button type="button" onClick={() => window.print()} className="mt-4 rounded-xl bg-green-700 px-5 py-3 font-semibold text-white hover:bg-green-800 print:hidden">
-                  Print / save ticket
-                </button>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-3 print:hidden">
+                  <button type="button" onClick={() => window.print()} className="rounded-xl bg-green-700 px-5 py-3 font-semibold text-white hover:bg-green-800">
+                    Print / save ticket
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        localStorage.removeItem("yoga_individual_registration_draft");
+                        localStorage.removeItem("yoga_school_registration_draft");
+                        localStorage.removeItem("last_registration_type");
+                      } catch (_) {}
+                      if (isSchoolEntry) {
+                        navigate("/school-registration");
+                      } else {
+                        navigate("/register");
+                      }
+                    }}
+                    className="rounded-xl border-2 border-green-700 bg-white px-5 py-3 font-semibold text-green-800 hover:bg-green-50 shadow-sm"
+                  >
+                    ➕ Register Another Participant
+                  </button>
+                </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 {registration.participants.map((participant) => (

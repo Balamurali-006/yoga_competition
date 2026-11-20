@@ -2,7 +2,7 @@ const cors = require("cors");
 const crypto = require("crypto");
 const express = require("express");
 const multer = require("multer");
-const { sendEmail: sendEmailWithBrevo } = require("./email");
+const { sendEmail: sendEmailWithGmail } = require("./email");
 const {
   PAYMENT_STATUSES,
   amountToPaise,
@@ -117,20 +117,32 @@ const createApp = ({
   admin,
   storage,
   env = process.env,
-  sendEmail = sendEmailWithBrevo,
+  sendEmail = sendEmailWithGmail,
   generatePaymentReference = () => crypto.randomInt(100000, 1000000),
 }) => {
   const app = express();
   app.disable("x-powered-by");
-  const allowedOrigins = String(env.CORS_ORIGIN || "http://localhost:3000")
+  const rawOrigins = String(env.CORS_ORIGIN || "http://localhost:3000")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+  const allowedOrigins = Array.from(
+    new Set(
+      rawOrigins.flatMap((orig) => {
+        const clean = orig.replace(/\/+$/, "");
+        const hostOnly = clean.replace(/^https?:\/\//, "");
+        return [clean, `https://${hostOnly}`, `http://${hostOnly}`, hostOnly];
+      })
+    )
+  );
+
   app.use(cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("Origin is not allowed by CORS."));
+      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes("*")) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin ${origin} is not allowed by CORS.`));
     },
   }));
   app.use(express.json({ limit: "5mb" }));
@@ -150,23 +162,24 @@ const createApp = ({
   const publicLimiter = makeRateLimiter({ windowMs, max: maxRequests });
   const submitLimiter = makeRateLimiter({ windowMs, max: Math.min(maxRequests, 8) });
   const verificationLimiter = makeRateLimiter({ windowMs, max: Math.max(5, maxRequests) });
-  const emailConfigured = Boolean(env.BREVO_API_KEY && env.EMAIL_FROM);
 
   const deliverEmail = async ({ to, subject, text }, failureMessage) => {
-    if (!emailConfigured) {
-      throw new ApiError(503, "Brevo email is not configured. Set BREVO_API_KEY and EMAIL_FROM.");
+    if (!env.SMTP_USER || !env.SMTP_APP_PASSWORD) {
+      throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
     }
 
     try {
       await sendEmail({
-        from: env.EMAIL_FROM,
-        fromName: env.EMAIL_FROM_NAME || "Ekadhma Yoga Association",
-        replyTo: env.EMAIL_REPLY_TO || undefined,
+        from: env.EMAIL_FROM || env.SMTP_USER,
         to,
         subject,
         text,
       }, {
-        apiKey: env.BREVO_API_KEY,
+        host: env.SMTP_HOST || "smtp.gmail.com",
+        port: Number(env.SMTP_PORT) || 465,
+        secure: String(env.SMTP_SECURE || "true").toLowerCase() !== "false",
+        user: env.SMTP_USER,
+        pass: env.SMTP_APP_PASSWORD,
       });
     } catch (error) {
       console.error("Email notification delivery failed:", error.message);
@@ -544,8 +557,8 @@ const createApp = ({
       let screenshotFile = null;
       let submissionCommitted = false;
       try {
-        if (!emailConfigured) {
-          throw new ApiError(503, "Brevo email is not configured. Set BREVO_API_KEY and EMAIL_FROM.");
+        if (!env.SMTP_USER || !env.SMTP_APP_PASSWORD) {
+          throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
         }
 
         const utr = normalizeUtr(req.body.utr);
@@ -864,8 +877,8 @@ const createApp = ({
       if (nextStatus === "REJECTED" && !reason) {
         throw new ApiError(400, "A rejection reason is required.");
       }
-      if (nextStatus === "VERIFIED" && !emailConfigured) {
-        throw new ApiError(503, "Brevo email is not configured. Set BREVO_API_KEY and EMAIL_FROM.");
+      if (nextStatus === "VERIFIED" && (!env.SMTP_USER || !env.SMTP_APP_PASSWORD)) {
+        throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
       }
 
       const paymentRef = db.collection("upiPayments").doc(req.params.paymentId);
@@ -957,9 +970,9 @@ const createApp = ({
         const draftParticipants = Array.isArray(payment.participantDrafts) && payment.participantDrafts.length
           ? payment.participantDrafts
           : (payment.participantSummary || []).map((participant) => ({
-              registrationId: participant.registrationId,
-              ...participant,
-            }));
+            registrationId: participant.registrationId,
+            ...participant,
+          }));
 
         let serialNumbers = payment.serialNumbers || [];
         let counterRef = null;

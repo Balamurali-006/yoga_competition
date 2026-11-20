@@ -80,13 +80,16 @@ const SchoolRegistrationTable = () => {
   // Automatically keep draft in localStorage so navigating back from payment restores all rows
   useEffect(() => {
     try {
-      localStorage.setItem(SCHOOL_DRAFT_KEY, JSON.stringify({
-        students,
-        institution,
-        instructor,
-        instructorPhone,
-        email,
-      }));
+      const hasAnyData = students.some((s) => s.name?.trim()) || institution.trim() || instructor.trim();
+      if (hasAnyData) {
+        localStorage.setItem(SCHOOL_DRAFT_KEY, JSON.stringify({
+          students,
+          institution,
+          instructor,
+          instructorPhone,
+          email,
+        }));
+      }
     } catch (_) {}
   }, [students, institution, instructor, instructorPhone, email]);
 
@@ -102,6 +105,7 @@ const SchoolRegistrationTable = () => {
   const clearForm = () => {
     try {
       localStorage.removeItem(SCHOOL_DRAFT_KEY);
+      localStorage.removeItem("last_registration_type");
     } catch (_) {}
     setStudents([emptyStudent()]);
     setInstitution("");
@@ -171,9 +175,10 @@ const SchoolRegistrationTable = () => {
       });
       saveRegistrationAccess(registration.paymentGroupId, registration.accessToken);
       try {
+        localStorage.setItem("last_registration_type", "school");
         sessionStorage.setItem("payment_entry_type_" + registration.paymentGroupId, "school");
       } catch (_) {}
-      navigate(`/upi-payment/${registration.paymentGroupId}`, { state: { entryType: "school" } });
+      navigate(`/upi-payment/${registration.paymentGroupId}?type=school`, { state: { entryType: "school" } });
     } catch (submitError) {
       console.error("Group registration failed:", submitError);
       setError(submitError.message || "Could not save group registrations.");
