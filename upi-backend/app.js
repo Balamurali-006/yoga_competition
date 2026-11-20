@@ -2,7 +2,7 @@ const cors = require("cors");
 const crypto = require("crypto");
 const express = require("express");
 const multer = require("multer");
-const { sendEmail: sendEmailWithGmail } = require("./email");
+const { sendEmail: sendEmailWithBrevo } = require("./email");
 const {
   PAYMENT_STATUSES,
   amountToPaise,
@@ -117,20 +117,32 @@ const createApp = ({
   admin,
   storage,
   env = process.env,
-  sendEmail = sendEmailWithGmail,
+  sendEmail = sendEmailWithBrevo,
   generatePaymentReference = () => crypto.randomInt(100000, 1000000),
 }) => {
   const app = express();
   app.disable("x-powered-by");
-  const allowedOrigins = String(env.CORS_ORIGIN || "http://localhost:3000")
+  const rawOrigins = String(env.CORS_ORIGIN || "http://localhost:3000")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+  const allowedOrigins = Array.from(
+    new Set(
+      rawOrigins.flatMap((orig) => {
+        const clean = orig.replace(/\/+$/, "");
+        const hostOnly = clean.replace(/^https?:\/\//, "");
+        return [clean, `https://${hostOnly}`, `http://${hostOnly}`, hostOnly];
+      })
+    )
+  );
+
   app.use(cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("Origin is not allowed by CORS."));
+      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes("*")) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin ${origin} is not allowed by CORS.`));
     },
   }));
   app.use(express.json({ limit: "5mb" }));
@@ -150,28 +162,27 @@ const createApp = ({
   const publicLimiter = makeRateLimiter({ windowMs, max: maxRequests });
   const submitLimiter = makeRateLimiter({ windowMs, max: Math.min(maxRequests, 8) });
   const verificationLimiter = makeRateLimiter({ windowMs, max: Math.max(5, maxRequests) });
+  const emailConfigured = Boolean(env.BREVO_API_KEY && env.EMAIL_FROM);
 
   const deliverEmail = async ({ to, subject, text }, failureMessage) => {
-    if (!env.SMTP_USER || !env.SMTP_APP_PASSWORD) {
-      throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
+    if (!emailConfigured) {
+      console.warn("Brevo email is not configured (BREVO_API_KEY and EMAIL_FROM). Skipping email delivery.");
+      return;
     }
 
     try {
       await sendEmail({
-        from: env.EMAIL_FROM || env.SMTP_USER,
+        from: env.EMAIL_FROM,
+        fromName: env.EMAIL_FROM_NAME || "Ekadhma Yoga Association",
+        replyTo: env.EMAIL_REPLY_TO || undefined,
         to,
         subject,
         text,
       }, {
-        host: env.SMTP_HOST || "smtp.gmail.com",
-        port: Number(env.SMTP_PORT) || 465,
-        secure: String(env.SMTP_SECURE || "true").toLowerCase() !== "false",
-        user: env.SMTP_USER,
-        pass: env.SMTP_APP_PASSWORD,
+        apiKey: env.BREVO_API_KEY,
       });
     } catch (error) {
       console.error("Email notification delivery failed:", error.message);
-      throw new ApiError(502, failureMessage);
     }
   };
 
@@ -389,7 +400,7 @@ const createApp = ({
     }
   });
 
-  const createRegistrations = async (participants, feePaise, groupId) => {
+  const createRegistrations = async (participants, feePaise, groupId, entryType = "individual") => {
     if (!Array.isArray(participants) || participants.length < 1 || participants.length > 100) {
       throw new ApiError(400, "Submit between 1 and 100 participants.");
     }
@@ -457,6 +468,7 @@ const createApp = ({
           participantSummary,
           participantDrafts: draftParticipants,
           participantCount: participantIds.length,
+          entryType,
           paymentReference: candidate,
           amountPaise: feePaise * participantIds.length,
           expectedAmountPaise: feePaise * participantIds.length,
@@ -503,6 +515,7 @@ const createApp = ({
       participantCount: participantIds.length,
       amountPaise: feePaise * participantIds.length,
       accessToken,
+      entryType,
     };
   };
 
@@ -510,7 +523,9 @@ const createApp = ({
     try {
       const registration = await createRegistrations(
         [req.body],
-        req.registrationFeePaise
+        req.registrationFeePaise,
+        null,
+        "individual"
       );
       return res.status(201).json(registration);
     } catch (error) {
@@ -522,7 +537,9 @@ const createApp = ({
     try {
       const registration = await createRegistrations(
         req.body.participants,
-        req.registrationFeePaise
+        req.registrationFeePaise,
+        null,
+        "school"
       );
       return res.status(201).json(registration);
     } catch (error) {
@@ -539,10 +556,6 @@ const createApp = ({
       let screenshotFile = null;
       let submissionCommitted = false;
       try {
-        if (!env.SMTP_USER || !env.SMTP_APP_PASSWORD) {
-          throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
-        }
-
         const utr = normalizeUtr(req.body.utr);
         const amountPaise = amountToPaise(req.body.amount);
         const paymentDateTime = cleanString(req.body.paymentDateTime, 40);
@@ -701,6 +714,7 @@ const createApp = ({
           paymentReference: payment.paymentReference || null,
           registrationId: payment.registrationId,
           participantCount: payment.participantCount,
+          entryType: payment.entryType || (payment.participantCount > 1 ? "school" : "individual"),
           amountPaise: payment.expectedAmountPaise,
           paymentStatus: payment.paymentStatus,
           utr: payment.utr || null,
@@ -858,9 +872,6 @@ const createApp = ({
       if (nextStatus === "REJECTED" && !reason) {
         throw new ApiError(400, "A rejection reason is required.");
       }
-      if (nextStatus === "VERIFIED" && (!env.SMTP_USER || !env.SMTP_APP_PASSWORD)) {
-        throw new ApiError(503, "Gmail SMTP is not configured. Set SMTP_USER and SMTP_APP_PASSWORD.");
-      }
 
       const paymentRef = db.collection("upiPayments").doc(req.params.paymentId);
       const auditRef = db.collection("paymentAuditLogs").doc();
@@ -951,9 +962,9 @@ const createApp = ({
         const draftParticipants = Array.isArray(payment.participantDrafts) && payment.participantDrafts.length
           ? payment.participantDrafts
           : (payment.participantSummary || []).map((participant) => ({
-              registrationId: participant.registrationId,
-              ...participant,
-            }));
+            registrationId: participant.registrationId,
+            ...participant,
+          }));
 
         let serialNumbers = payment.serialNumbers || [];
         let counterRef = null;

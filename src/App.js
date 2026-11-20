@@ -6,6 +6,7 @@ import AdminRoute from "./components/common/AdminRoute";
 
 import Navbar from "./components/common/Navbar";
 import Footer from "./components/common/Footer";
+import ScrollToTopButton from "./components/common/ScrollToTopButton";
 
 /* PUBLIC PAGES */
 import Home from "./pages/Home";
@@ -84,6 +85,7 @@ function App() {
 
       </Routes>
 
+      <ScrollToTopButton />
       <Footer />
     </Router>
   );
